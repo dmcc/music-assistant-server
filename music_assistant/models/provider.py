@@ -9,7 +9,7 @@ from music_assistant.constants import CONF_LOG_LEVEL, MASS_LOGGER_NAME
 
 if TYPE_CHECKING:
     from music_assistant_models.config_entries import ProviderConfig
-    from music_assistant_models.enums import ProviderFeature, ProviderType
+    from music_assistant_models.enums import ProviderFeature, ProviderStage, ProviderType
     from music_assistant_models.provider import ProviderManifest
     from zeroconf import ServiceStateChange
     from zeroconf.asyncio import AsyncServiceInfo
@@ -118,6 +118,12 @@ class Provider:
     def instance_name_postfix(self) -> str | None:
         """Return a (default) instance name postfix for this provider instance."""
         return None
+
+    @property
+    @final
+    def stage(self) -> ProviderStage:
+        """Return the stage of this provider."""
+        return self.manifest.stage
 
     def update_config_value(self, key: str, value: Any, encrypted: bool = False) -> None:
         """Update a config value."""
