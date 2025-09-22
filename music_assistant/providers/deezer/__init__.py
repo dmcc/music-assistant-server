@@ -44,6 +44,7 @@ from music_assistant import MusicAssistant
 from music_assistant.helpers.app_vars import app_var
 from music_assistant.helpers.auth import AuthenticationHelper
 from music_assistant.helpers.datetime import utc_timestamp
+from music_assistant.helpers.util import infer_album_type
 from music_assistant.models import ProviderInstanceType
 from music_assistant.models.music_provider import MusicProvider
 
@@ -691,20 +692,26 @@ class DeezerProvider(MusicProvider):
 
     def get_album_type(self, album: deezer.Album) -> AlbumType:
         """Read and convert the Deezer album type."""
-        if not hasattr(album, "record_type"):
-            return AlbumType.UNKNOWN
+        # Get provider's basic type first
+        provider_type = AlbumType.UNKNOWN
+        if hasattr(album, "record_type"):
+            match album.record_type:
+                case "album":
+                    provider_type = AlbumType.ALBUM
+                case "single":
+                    provider_type = AlbumType.SINGLE
+                case "ep":
+                    provider_type = AlbumType.EP
+                case "compile":
+                    provider_type = AlbumType.COMPILATION
 
-        match album.record_type:
-            case "album":
-                return AlbumType.ALBUM
-            case "single":
-                return AlbumType.SINGLE
-            case "ep":
-                return AlbumType.EP
-            case "compile":
-                return AlbumType.COMPILATION
-            case _:
-                return AlbumType.UNKNOWN
+        # Try inference - override if it finds something more specific
+        inferred_type = infer_album_type(album.title, "")
+        if inferred_type in (AlbumType.SOUNDTRACK, AlbumType.LIVE):
+            return inferred_type
+
+        # Otherwise use provider type
+        return provider_type
 
     ### SEARCH AND PARSE FUNCTIONS ###
     async def search_and_parse_tracks(
