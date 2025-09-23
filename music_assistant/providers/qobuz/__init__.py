@@ -518,7 +518,7 @@ class QobuzProvider(MusicProvider):
             artist.metadata.description = artist_obj["biography"].get("content")
         return artist
 
-    async def parse_album(
+    async def _parse_album(
         self, album_obj: dict[str, Any], artist_obj: dict[str, Any] | None = None
     ) -> Album:
         """Parse qobuz album object to generic layout."""
