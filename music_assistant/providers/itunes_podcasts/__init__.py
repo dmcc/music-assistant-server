@@ -31,6 +31,7 @@ from music_assistant_models.media_items import (
 )
 from music_assistant_models.streamdetails import StreamDetails
 
+from music_assistant.controllers.cache import use_cache
 from music_assistant.helpers.podcast_parsers import (
     get_podcastparser_dict,
     parse_podcast,
@@ -134,6 +135,7 @@ class ITunesPodcastsProvider(MusicProvider):
         # 20 requests per minute, be a bit below
         self.throttler = ThrottlerManager(rate_limit=18, period=60)
 
+    @use_cache(3600 * 24 * 7)  # Cache for 7 days
     async def search(
         self, search_query: str, media_types: list[MediaType], limit: int = 10
     ) -> SearchResults:
@@ -329,7 +331,7 @@ class ITunesPodcastsProvider(MusicProvider):
     async def _cache_get_podcast(self, prov_podcast_id: str) -> dict[str, Any]:
         parsed_podcast = await self.mass.cache.get(
             key=prov_podcast_id,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_PODCASTS,
             default=None,
         )
@@ -350,7 +352,7 @@ class ITunesPodcastsProvider(MusicProvider):
     async def _cache_set_podcast(self, feed_url: str, parsed_podcast: dict[str, Any]) -> None:
         await self.mass.cache.set(
             key=feed_url,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_PODCASTS,
             data=parsed_podcast,
             expiration=60 * 60 * 24,  # 1 day
@@ -359,7 +361,7 @@ class ITunesPodcastsProvider(MusicProvider):
     async def _cache_set_top_podcasts(self, top_podcast_helper: TopPodcastsHelper) -> None:
         await self.mass.cache.set(
             key=CACHE_KEY_TOP_PODCASTS,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_RECOMMENDATIONS,
             data=top_podcast_helper.to_dict(),
             expiration=60 * 60 * 6,  # 6 hours
@@ -368,7 +370,7 @@ class ITunesPodcastsProvider(MusicProvider):
     async def _cache_get_top_podcasts(self) -> list[PodcastSearchResult]:
         parsed_top_podcasts = await self.mass.cache.get(
             key=CACHE_KEY_TOP_PODCASTS,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_RECOMMENDATIONS,
         )
         if parsed_top_podcasts is not None:

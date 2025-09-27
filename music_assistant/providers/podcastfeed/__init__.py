@@ -26,6 +26,7 @@ from music_assistant_models.errors import InvalidProviderURI, MediaNotFoundError
 from music_assistant_models.media_items import AudioFormat, Podcast, PodcastEpisode
 from music_assistant_models.streamdetails import StreamDetails
 
+from music_assistant.controllers.cache import use_cache
 from music_assistant.helpers.compare import create_safe_string
 from music_assistant.helpers.podcast_parsers import (
     get_podcastparser_dict,
@@ -132,12 +133,14 @@ class PodcastMusicprovider(MusicProvider):
         await self._cache_set_podcast()
         yield await self._parse_podcast()
 
+    @use_cache(3600 * 24 * 7)  # Cache for 7 days
     async def get_podcast(self, prov_podcast_id: str) -> Podcast:
         """Get full artist details by id."""
         if prov_podcast_id != self.podcast_id:
             raise RuntimeError(f"Podcast id not in provider: {prov_podcast_id}")
         return await self._parse_podcast()
 
+    @use_cache(3600)  # Cache for 1 hour
     async def get_podcast_episode(self, prov_episode_id: str) -> PodcastEpisode:
         """Get (full) podcast episode details by id."""
         for idx, episode in enumerate(self.parsed_podcast["episodes"]):
@@ -161,6 +164,7 @@ class PodcastMusicprovider(MusicProvider):
             if mass_episode := self._parse_episode(episode, idx):
                 yield mass_episode
 
+    @use_cache(3600)  # Cache for 1 hour
     async def get_stream_details(self, item_id: str, media_type: MediaType) -> StreamDetails:
         """Get streamdetails for a track/radio."""
         for episode in self.parsed_podcast["episodes"]:
@@ -213,7 +217,7 @@ class PodcastMusicprovider(MusicProvider):
     async def _cache_get_podcast(self) -> dict[str, Any]:
         parsed_podcast = await self.mass.cache.get(
             key=self.podcast_id,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_PODCASTS,
             default=None,
         )
@@ -226,7 +230,7 @@ class PodcastMusicprovider(MusicProvider):
     async def _cache_set_podcast(self) -> None:
         await self.mass.cache.set(
             key=self.podcast_id,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_PODCASTS,
             data=self.parsed_podcast,
             expiration=60 * 60 * 24,  # 1 day

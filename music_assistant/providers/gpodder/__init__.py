@@ -288,7 +288,7 @@ class GPodder(MusicProvider):
 
         timestamps = await self.mass.cache.get(
             key=CACHE_KEY_TIMESTAMP,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_OTHER,
             default=None,
         )
@@ -306,7 +306,7 @@ class GPodder(MusicProvider):
 
         feeds = await self.mass.cache.get(
             key=CACHE_KEY_FEEDS,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_OTHER,
             default=None,
         )
@@ -610,7 +610,7 @@ class GPodder(MusicProvider):
     async def _cache_get_podcast(self, prov_podcast_id: str) -> dict[str, Any]:
         parsed_podcast = await self.mass.cache.get(
             key=prov_podcast_id,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_PODCAST_ITEMS,
             default=None,
         )
@@ -628,7 +628,7 @@ class GPodder(MusicProvider):
     async def _cache_set_podcast(self, feed_url: str, parsed_podcast: dict[str, Any]) -> None:
         await self.mass.cache.set(
             key=feed_url,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_PODCAST_ITEMS,
             data=parsed_podcast,
             expiration=60 * 60 * 24,  # 1 day
@@ -638,7 +638,7 @@ class GPodder(MusicProvider):
         # seven days default
         await self.mass.cache.set(
             key=CACHE_KEY_TIMESTAMP,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_OTHER,
             data=[self.timestamp_subscriptions, self.timestamp_actions],
         )
@@ -647,7 +647,7 @@ class GPodder(MusicProvider):
         # seven days default
         await self.mass.cache.set(
             key=CACHE_KEY_FEEDS,
-            base_key=self.lookup_key,
+            provider=self.instance_id,
             category=CACHE_CATEGORY_OTHER,
             data=self.feeds,
         )
