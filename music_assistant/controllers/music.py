@@ -8,6 +8,7 @@ import os
 import shutil
 from collections.abc import Sequence
 from contextlib import suppress
+from copy import deepcopy
 from datetime import datetime
 from itertools import zip_longest
 from math import inf
@@ -610,7 +611,7 @@ class MusicController(CoreController):
             )
             if conf_export_library != "export_favorite":
                 continue
-            prov_item = full_item
+            prov_item = deepcopy(full_item)
             prov_item.provider = prov_mapping.provider_instance
             prov_item.item_id = prov_mapping.item_id
             self.mass.create_task(provider.library_add(prov_item))
