@@ -20,7 +20,7 @@ import asyncio
 import functools
 import time
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, TypedDict, cast
 
 from music_assistant_models.constants import (
     PLAYER_CONTROL_FAKE,
@@ -65,7 +65,6 @@ from music_assistant.constants import (
     CONF_PLAYERS,
     CONF_PRE_ANNOUNCE_CHIME_URL,
 )
-from music_assistant.controllers.streams import AnnounceData
 from music_assistant.helpers.api import api_command
 from music_assistant.helpers.tags import async_parse_tags
 from music_assistant.helpers.throttle_retry import Throttler
@@ -74,6 +73,8 @@ from music_assistant.models.core_controller import CoreController
 from music_assistant.models.player import Player, PlayerMedia, PlayerState
 from music_assistant.models.player_provider import PlayerProvider
 from music_assistant.models.plugin import PluginProvider, PluginSource
+
+from .sync_groups import SyncGroupController, SyncGroupPlayer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Iterator
@@ -84,18 +85,21 @@ if TYPE_CHECKING:
 CACHE_CATEGORY_PLAYER_POWER = 1
 
 
-_PlayerControllerT = TypeVar("_PlayerControllerT", bound="PlayerController")
-_R = TypeVar("_R")
-_P = ParamSpec("_P")
+class AnnounceData(TypedDict):
+    """Announcement data."""
+
+    announcement_url: str
+    pre_announce: bool
+    pre_announce_url: str
 
 
 def handle_player_command[PlayerControllerT: "PlayerController", **P, R](
-    func: Callable[Concatenate[_PlayerControllerT, _P], Awaitable[_R]],
-) -> Callable[Concatenate[_PlayerControllerT, _P], Coroutine[Any, Any, _R | None]]:
+    func: Callable[Concatenate[PlayerControllerT, P], Awaitable[R]],
+) -> Callable[Concatenate[PlayerControllerT, P], Coroutine[Any, Any, R | None]]:
     """Check and log commands to players."""
 
     @functools.wraps(func)
-    async def wrapper(self: _PlayerControllerT, *args: _P.args, **kwargs: _P.kwargs) -> _R | None:
+    async def wrapper(self: PlayerControllerT, *args: P.args, **kwargs: P.kwargs) -> R | None:
         """Log and handle_player_command commands to players."""
         player_id = kwargs["player_id"] if "player_id" in kwargs else args[0]
         if (player := self._players.get(player_id)) is None or not player.available:
@@ -138,6 +142,7 @@ class PlayerController(CoreController):
         self._poll_task: asyncio.Task | None = None
         self._player_throttlers: dict[str, Throttler] = {}
         self._announce_locks: dict[str, asyncio.Lock] = {}
+        self._sync_groups: SyncGroupController = SyncGroupController(self)
 
     async def setup(self, config: CoreConfig) -> None:
         """Async initialize of module."""
@@ -147,6 +152,16 @@ class PlayerController(CoreController):
         """Cleanup on exit."""
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
+
+    async def on_provider_loaded(self, provider: PlayerProvider) -> None:
+        """Handle logic when a provider is loaded."""
+        if ProviderFeature.SYNC_PLAYERS in provider.supported_features:
+            await self._sync_groups.on_provider_loaded(provider)
+
+    async def on_provider_unload(self, provider: PlayerProvider) -> None:
+        """Handle logic when a provider is (about to get) unloaded."""
+        if ProviderFeature.SYNC_PLAYERS in provider.supported_features:
+            await self._sync_groups.on_provider_unload(provider)
 
     @property
     def providers(self) -> list[PlayerProvider]:
@@ -158,6 +173,7 @@ class PlayerController(CoreController):
         return_unavailable: bool = True,
         return_disabled: bool = False,
         provider_filter: str | None = None,
+        return_sync_groups: bool = True,
     ) -> list[Player]:
         """
         Return all registered players.
@@ -174,6 +190,7 @@ class PlayerController(CoreController):
             if (player.available or return_unavailable)
             and (player.enabled or return_disabled)
             and (provider_filter is None or player.provider.lookup_key == provider_filter)
+            and (return_sync_groups or not isinstance(player, SyncGroupPlayer))
         ]
 
     @api_command("players/all")
@@ -895,8 +912,8 @@ class PlayerController(CoreController):
             if player.playback_state != PlaybackState.IDLE:
                 await self.cmd_stop(player_id)
                 await asyncio.sleep(0.5)  # small delay to allow stop to process
-            player.active_source = None
-            player.current_media = None
+            player.state.active_source = None
+            player.state.current_media = None
         # check if source is a pluginsource
         # in that case the source id is the instance_id of the plugin provider
         if plugin_prov := self.mass.get_provider(source):
@@ -1150,17 +1167,25 @@ class PlayerController(CoreController):
         """
         Create a new (permanent) Group Player.
 
-        :param provider: The provider to create the group player for
+        :param provider: The provider(id) to create the group player for
         :param name: Name of the new group player
         :param members: List of player ids to add to the group
         :param dynamic: Whether the group is dynamic (members can change)
         """
         if not (provider_instance := self.mass.get_provider(provider)):
             raise ProviderUnavailableError(f"Provider {provider} not found")
-        provider_instance.check_feature(ProviderFeature.CREATE_GROUP_PLAYER)
         provider_instance = cast("PlayerProvider", provider_instance)
-        # create the group player
-        return await provider_instance.create_group_player(name, members, dynamic)
+        if ProviderFeature.CREATE_GROUP_PLAYER in provider_instance.supported_features:
+            return await provider_instance.create_group_player(name, members, dynamic)
+        if ProviderFeature.SYNC_PLAYERS in provider_instance.supported_features:
+            # provider supports syncing but not dedicated group players
+            # create a sync group instead
+            return await self._sync_groups.create_group_player(
+                provider_instance, name, members, dynamic=dynamic
+            )
+        raise UnsupportedFeaturedException(
+            f"Provider {provider} does not support creating group players"
+        )
 
     @api_command("players/remove_group_player")
     async def remove_group_player(self, player_id: str) -> None:
@@ -1693,7 +1718,6 @@ class PlayerController(CoreController):
                 await self.cmd_power(config.player_id, False)
             elif player.playback_state != PlaybackState.IDLE:
                 await self.cmd_stop(config.player_id)
-            player.available = False
         # if the PlayerQueue was playing, restart playback
         # TODO: add property to ConfigEntry if it requires a restart of playback on change
         elif not player_disabled and resume_queue and resume_queue.state == PlaybackState.PLAYING:
@@ -1977,9 +2001,6 @@ class PlayerController(CoreController):
                         str(err),
                         exc_info=err if self.logger.isEnabledFor(10) else None,
                     )
-                finally:
-                    # always update player state
-                    self.mass.loop.call_soon(player.update_state)
             await asyncio.sleep(1)
 
     async def _handle_select_plugin_source(
