@@ -1495,8 +1495,8 @@ class PlayerController(CoreController):
             prev_group_members = changed_values[ATTR_GROUP_MEMBERS][0] or []
             new_group_members = changed_values[ATTR_GROUP_MEMBERS][1] or []
             removed_members = set(prev_group_members) - set(new_group_members)
-            for player_id in removed_members:
-                if removed_player := self.get(player_id):
+            for _removed_player_id in removed_members:
+                if removed_player := self.get(_removed_player_id):
                     removed_player.update_state()
 
         became_inactive = False
