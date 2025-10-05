@@ -258,7 +258,7 @@ def get_ffmpeg_args(  # noqa: PLR0915
         "-probesize",
         "8096",
         "-analyzeduration",
-        "500000",  # 1 seconds should be enough to detect the format
+        "500000",  # 0.5 seconds should be enough to detect the format
     ]
     # collect input args
     if "-f" in extra_input_args:

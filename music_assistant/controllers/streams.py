@@ -966,8 +966,6 @@ class StreamsController(CoreController):
             # afterwards play the TTS itself.
             #
             # For this to be effective the player itself needs to be able to start playback fast.
-            # If the returned stream is used as input to ffmpeg we should pass -probesize 8096.
-            #
             # Finally, if the output_format is non-PCM, raw concatenation can be problematic.
             # So far players seem to tolerate this, but it might break some player in the future.
 
@@ -982,13 +980,11 @@ class StreamsController(CoreController):
         # work out output format/details
         fmt = announcement_url.rsplit(".")[-1]
         audio_format = AudioFormat(content_type=ContentType.try_parse(fmt))
-        extra_input_args = ["-probesize", "8096"]  # start the stream before reading all TTS input
         async for chunk in get_ffmpeg_stream(
             audio_input=announcement_url,
             input_format=audio_format,
             output_format=output_format,
             filter_params=filter_params,
-            extra_input_args=extra_input_args,
         ):
             yield chunk
 
