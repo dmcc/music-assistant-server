@@ -44,6 +44,8 @@ if TYPE_CHECKING:
 class ChromecastPlayer(Player):
     """Chromecast Player."""
 
+    active_cast_group: str | None = None
+
     def __init__(
         self,
         provider: ChromecastProvider,
@@ -233,7 +235,7 @@ class ChromecastPlayer(Player):
             return
         if not self.cc.media_controller.status.player_is_playing:
             return
-        if self.active_group:
+        if self.active_cast_group:
             return
         if self.state != PlaybackState.PLAYING:
             return
@@ -405,8 +407,8 @@ class ChromecastPlayer(Player):
         )
         # handle player playing from a group
         group_player: ChromecastPlayer | None = None
-        if self.active_group is not None:
-            if not (group_player := self.mass.players.get(self.active_group)):
+        if self.active_cast_group is not None:
+            if not (group_player := self.mass.players.get(self.active_cast_group)):
                 return
             if not isinstance(group_player, ChromecastPlayer):
                 return
