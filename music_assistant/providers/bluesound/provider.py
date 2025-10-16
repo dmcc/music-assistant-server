@@ -12,8 +12,8 @@ from music_assistant.helpers.util import (
     get_primary_ip_address_from_zeroconf,
 )
 from music_assistant.models.player_provider import PlayerProvider
-from music_assistant.providers.bluesound.const import MUSP_MDNS_TYPE
 
+from .const import MUSP_MDNS_TYPE
 from .player import BluesoundPlayer
 
 if TYPE_CHECKING:
