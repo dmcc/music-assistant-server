@@ -385,7 +385,7 @@ def use_cache(
         @functools.wraps(func)
         async def wrapper(self: ProviderT, *args: P.args, **kwargs: P.kwargs) -> R:
             cache = self.mass.cache
-            provider_id = getattr(self, "provider_id", self.domain)
+            provider_id = getattr(self, "instance_id", self.domain)
 
             # create a cache key dynamically based on the (remaining) args/kwargs
             cache_key_parts = [func.__name__, *args]
