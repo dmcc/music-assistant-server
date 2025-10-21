@@ -17,25 +17,31 @@ jobs:
   auto-merge:
     name: Auto-approve and merge
     runs-on: ubuntu-latest
-    # Only run if PR is from our automation accounts
+    # Only run if branch name matches the expected pattern
     if: |
-      github.event.pull_request.user.login == 'github-actions[bot]' ||
-      github.event.pull_request.user.login == 'music-assistant-machine'
+      startsWith(github.event.pull_request.head.ref, 'auto-update-frontend-') ||
+      startsWith(github.event.pull_request.head.ref, 'auto-update-models-')
 
     permissions:
       contents: write
       pull-requests: write
 
     steps:
-      # Security check 1: Verify PR is from trusted automation
-      - name: Verify PR is from trusted automation
+      # Security check 1: Verify PR is from user with write access
+      - name: Verify PR is from trusted source
+        id: verify_pr_author
         run: |
           PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-          if [[ "$PR_AUTHOR" != "github-actions[bot]" && "$PR_AUTHOR" != "music-assistant-machine" ]]; then
-            echo "❌ PR author is not a trusted automation account: $PR_AUTHOR"
+
+          # Check if PR author has write access to the repository (includes org members and bots)
+          if gh api "/repos/${{ github.repository }}/collaborators/$PR_AUTHOR/permission" --jq '.permission' 2>/dev/null | grep -qE "^(admin|write|maintain)$"; then
+            echo "✅ PR is from user with write access: $PR_AUTHOR"
+          else
+            echo "❌ PR author does not have write access: $PR_AUTHOR"
             exit 1
           fi
-          echo "✅ PR is from trusted automation account: $PR_AUTHOR"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Security check 2: Verify PR labels and source branch
       - name: Verify PR labels and source
@@ -56,7 +62,7 @@ jobs:
           echo "✅ PR has 'dependencies' label and valid branch name"
 
       # IMPORTANT: Checkout the PR's head to validate file changes
-      # This is required for the git commands in security check 4
+      # This is required for the git commands in security check 5
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
@@ -74,22 +80,24 @@ jobs:
           COMMIT_AUTHOR=$(gh pr view "$PR_NUMBER" --json commits --jq '.commits[0].authors[0].login')
           echo "commit_author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
 
-          echo "PR #$PR_NUMBER from $COMMIT_AUTHOR"
+          echo "PR #$PR_NUMBER with commits from $COMMIT_AUTHOR"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Security check 4: Verify commit author matches PR author
+      # Security check 4: Verify commit author has write access
       - name: Verify commit author
         run: |
           COMMIT_AUTHOR="${{ steps.pr.outputs.commit_author }}"
-          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
 
-          if [[ "$COMMIT_AUTHOR" != "$PR_AUTHOR" ]]; then
-            echo "❌ Commit author ($COMMIT_AUTHOR) does not match PR author ($PR_AUTHOR)"
+          # Check if commit author has write access to the repository
+          if gh api "/repos/${{ github.repository }}/collaborators/$COMMIT_AUTHOR/permission" --jq '.permission' 2>/dev/null | grep -qE "^(admin|write|maintain)$"; then
+            echo "✅ Commit author has write access: $COMMIT_AUTHOR"
+          else
+            echo "❌ Commit author does not have write access: $COMMIT_AUTHOR"
             exit 1
           fi
-
-          echo "✅ Commit author matches PR author"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Security check 5: Verify only dependency files were changed
       - name: Verify only dependency files were changed
