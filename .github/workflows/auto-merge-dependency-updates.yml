@@ -24,12 +24,11 @@ jobs:
           # Security check 1: Ensure PR is from a trusted actor
           AUTHOR="${{ github.event.pull_request.user.login }}"
 
-          # Allow only the github-actions bot or specific trusted users/bots
-          # Adjust this list based on your setup
+          # Allow only the github-actions bot, music-assistant-machine, or specific trusted bots
           if [[ "$AUTHOR" != "github-actions[bot]" ]] && \
-             [[ "$AUTHOR" != "dependabot[bot]" ]]; then
+             [[ "$AUTHOR" != "music-assistant-machine" ]]; then
             echo "❌ PR author '$AUTHOR' is not a trusted automation account"
-            echo "Only github-actions[bot] is allowed to trigger auto-merge"
+            echo "Only github-actions[bot], music-assistant-machine are allowed to trigger auto-merge"
             exit 1
           fi
 
@@ -52,10 +51,11 @@ jobs:
           echo "✅ PR has required 'dependencies' label"
 
           # Security check 3: Verify commit author matches expected automation
-          # The commits should be authored by github-actions[bot]
+          # The commits should be authored by the trusted automation account
           COMMIT_AUTHOR=$(gh pr view "$PR_NUMBER" --json commits --jq '.commits[-1].authors[0].login')
 
           if [[ "$COMMIT_AUTHOR" != "github-actions[bot]" ]] && \
+             [[ "$COMMIT_AUTHOR" != "music-assistant-machine" ]] && \
              [[ "$COMMIT_AUTHOR" != "${{ github.event.pull_request.user.login }}" ]]; then
             echo "❌ Commit author '$COMMIT_AUTHOR' does not match PR author"
             exit 1
