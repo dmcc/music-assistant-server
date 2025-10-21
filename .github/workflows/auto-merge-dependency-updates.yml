@@ -1,0 +1,114 @@
+# Auto approve and merge dependency update PRs
+# for the frontend and models packages.
+
+name: Auto-merge Dependency Updates
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  auto-merge:
+    # Only run on PRs from dependency update branches
+    if: |
+      (startsWith(github.head_ref, 'auto-update-frontend-') ||
+       startsWith(github.head_ref, 'auto-update-models-')) &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    steps:
+      - name: Verify PR is from trusted automation
+        run: |
+          # Security check 1: Ensure PR is from a trusted actor
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+
+          # Allow only the github-actions bot or specific trusted users/bots
+          # Adjust this list based on your setup
+          if [[ "$AUTHOR" != "github-actions[bot]" ]] && \
+             [[ "$AUTHOR" != "dependabot[bot]" ]]; then
+            echo "❌ PR author '$AUTHOR' is not a trusted automation account"
+            echo "Only github-actions[bot] is allowed to trigger auto-merge"
+            exit 1
+          fi
+
+          echo "✅ PR author '$AUTHOR' is trusted"
+
+      - name: Verify PR labels and source
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          # Security check 2: Verify the PR has the 'dependencies' label
+          # This label should only be added by the automation workflow
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' | tr '\n' ' ')
+
+          if [[ ! "$LABELS" =~ "dependencies" ]]; then
+            echo "❌ PR does not have the required 'dependencies' label"
+            echo "This label should be automatically added by the automation workflow"
+            exit 1
+          fi
+
+          echo "✅ PR has required 'dependencies' label"
+
+          # Security check 3: Verify commit author matches expected automation
+          # The commits should be authored by github-actions[bot]
+          COMMIT_AUTHOR=$(gh pr view "$PR_NUMBER" --json commits --jq '.commits[-1].authors[0].login')
+
+          if [[ "$COMMIT_AUTHOR" != "github-actions[bot]" ]] && \
+             [[ "$COMMIT_AUTHOR" != "${{ github.event.pull_request.user.login }}" ]]; then
+            echo "❌ Commit author '$COMMIT_AUTHOR' does not match PR author"
+            exit 1
+          fi
+
+          echo "✅ Commit author verified"
+
+          # Security check 4: Verify only dependency files were changed
+          # Only pyproject.toml and requirements_all.txt should be modified
+          CHANGED_FILES=$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path' | tr '\n' ' ')
+
+          for file in $CHANGED_FILES; do
+            if [[ "$file" != "pyproject.toml" ]] && \
+               [[ "$file" != "requirements_all.txt" ]]; then
+              echo "❌ Unexpected file changed: $file"
+              echo "Only pyproject.toml and requirements_all.txt should be modified"
+              exit 1
+            fi
+          done
+
+          echo "✅ Only expected dependency files were changed"
+          echo "Changed files: $CHANGED_FILES"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR details
+        run: |
+          echo "PR #${{ github.event.pull_request.number }}"
+          echo "Branch: ${{ github.head_ref }}"
+          echo "Title: ${{ github.event.pull_request.title }}"
+          echo "Author: ${{ github.event.pull_request.user.login }}"
+
+      - name: Auto-approve PR
+        run: |
+          gh pr review "${{ github.event.pull_request.number }}" \
+            --approve \
+            --body "✅ Auto-approving automated dependency update."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge
+        run: |
+          gh pr merge "${{ github.event.pull_request.number }}" \
+            --auto \
+            --squash \
+            --delete-branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment on success
+        if: success()
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "🤖 Auto-merge has been enabled. This PR will automatically merge once all required checks pass."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
