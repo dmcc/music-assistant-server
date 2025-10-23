@@ -82,12 +82,12 @@ runs:
           gh pr list --state merged --limit 100 --json number,title,body --jq '.[] | select(.title | test("^⬆️ Update music-assistant-frontend to [0-9]")) | {number: .number, title: .title, body: .body}' > /tmp/frontend_prs.json
         else
           echo "Searching between $PREVIOUS_TAG and $BRANCH"
-          git log $PREVIOUS_TAG..$BRANCH --oneline --merges | grep -oP '#\K[0-9]+' > /tmp/pr_numbers.txt || echo ""
+          git log "$PREVIOUS_TAG..$BRANCH" --oneline --merges | grep -oP '#\K[0-9]+' > /tmp/pr_numbers.txt || echo ""
 
           > /tmp/frontend_prs.json
           while read -r PR_NUM; do
             if [ -n "$PR_NUM" ]; then
-              PR_DATA=$(gh pr view $PR_NUM --json number,title,body 2>/dev/null || echo "")
+              PR_DATA=$(gh pr view "$PR_NUM" --json number,title,body 2>/dev/null || echo "")
               if [ -n "$PR_DATA" ]; then
                 if echo "$PR_DATA" | jq -e '.title | test("^⬆️ Update music-assistant-frontend to [0-9]")' > /dev/null 2>&1; then
                   echo "$PR_DATA" >> /tmp/frontend_prs.json
@@ -122,7 +122,8 @@ runs:
             echo "✅ Found frontend changes"
 
             # Merge contributors (deduplicate and format)
-            MERGED_CONTRIBUTORS=$(sort -u "$CONTRIBUTORS_FILE" | sed 's/^/@/' | paste -sd ", " -)
+            # Contributors already have @ from grep, so don't add it again
+            MERGED_CONTRIBUTORS=$(sort -u "$CONTRIBUTORS_FILE" | paste -sd ", " -)
 
             # Find contributors section in base notes
             CONTRIB_LINE=$(grep -n "## :bow: Thanks to our contributors" /tmp/base_notes.md | head -1 | cut -d: -f1 || echo "")
