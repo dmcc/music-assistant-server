@@ -205,12 +205,44 @@ jobs:
           channel: ${{ inputs.channel }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Format release title
+        id: format_title
+        run: |
+          VERSION="${{ inputs.version }}"
+          CHANNEL="${{ inputs.channel }}"
+
+          if [[ "$CHANNEL" == "nightly" ]]; then
+            # Extract base version and date from X.Y.Z.devYYYYMMDD
+            if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)$ ]]; then
+              BASE="${BASH_REMATCH[1]}"
+              DATE="${BASH_REMATCH[2]}"
+              TITLE="$BASE Nightly $DATE"
+            else
+              TITLE="$VERSION Nightly"
+            fi
+          elif [[ "$CHANNEL" == "beta" ]]; then
+            # Extract base version and beta number from X.Y.Z.bN
+            if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.b([0-9]+)$ ]]; then
+              BASE="${BASH_REMATCH[1]}"
+              BETA_NUM="${BASH_REMATCH[2]}"
+              TITLE="$BASE Beta $BETA_NUM"
+            else
+              TITLE="$VERSION Beta"
+            fi
+          else
+            # Stable release - just use the version
+            TITLE="$VERSION"
+          fi
+
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "Release title: $TITLE"
+
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
-          name: ${{ inputs.version }}
+          name: ${{ steps.format_title.outputs.title }}
           body: ${{ steps.generate_notes.outputs.release-notes }}
           prerelease: ${{ needs.validate-and-build.outputs.is_prerelease }}
           target_commitish: ${{ needs.validate-and-build.outputs.branch }}

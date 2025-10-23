@@ -38,6 +38,7 @@ categories:
       - 'bugfix'
 
   - title: '🧰 Maintenance and dependency bumps'
+    after-other: true  # Show this section after "Other Changes"
     collapse-after: 3
     labels:
       - 'ci'

@@ -145,7 +145,54 @@ def format_change_line(pr, config):
     return result.replace("$URL", pr.html_url)
 
 
-def generate_release_notes(config, categories, uncategorized, contributors, previous_tag):
+def extract_frontend_changes(prs):
+    """Extract frontend changes from frontend update PRs.
+
+    Returns tuple of (frontend_changes_list, frontend_contributors_set)
+    """
+    frontend_changes = []
+    frontend_contributors = set()
+
+    # Pattern to match frontend update PRs
+    frontend_pr_pattern = re.compile(r"^⬆️ Update music-assistant-frontend to \d")
+
+    for pr in prs:
+        if not frontend_pr_pattern.match(pr.title):
+            continue
+
+        print(f"Processing frontend PR #{pr.number}: {pr.title}")  # noqa: T201
+
+        if not pr.body:
+            continue
+
+        # Extract bullet points from PR body, excluding headers and dependabot lines
+        for body_line in pr.body.split("\n"):
+            stripped_line = body_line.strip()
+            # Check if it's a bullet point
+            if stripped_line.startswith(("- ", "* ", "• ")):
+                # Skip thank you lines and dependency updates
+                if "🙇" in stripped_line:
+                    continue
+                if re.match(r"^[•\-\*]\s*Chore\(deps", stripped_line, re.IGNORECASE):
+                    continue
+
+                # Add the change
+                frontend_changes.append(stripped_line)
+
+                # Extract contributors mentioned in this line
+                contributors_in_line = re.findall(r"@([a-zA-Z0-9_-]+)", stripped_line)
+                frontend_contributors.update(contributors_in_line)
+
+                # Limit to 20 changes per PR
+                if len(frontend_changes) >= 20:
+                    break
+
+    return frontend_changes, frontend_contributors
+
+
+def generate_release_notes(  # noqa: PLR0915
+    config, categories, uncategorized, contributors, previous_tag, frontend_changes=None
+):
     """Generate the formatted release notes."""
     lines = []
 
@@ -163,9 +210,16 @@ def generate_release_notes(config, categories, uncategorized, contributors, prev
         lines.append(f"_Changes since [{previous_tag}]({repo_url}/releases/tag/{previous_tag})_")
         lines.append("")
 
-    # Add categorized PRs
+    # Add categorized PRs - first pass: categories without "after-other" flag
     category_configs = config.get("categories", [])
+    deferred_categories = []
+
     for cat_config in category_configs:
+        # Defer categories marked with after-other
+        if cat_config.get("after-other", False):
+            deferred_categories.append(cat_config)
+            continue
+
         cat_title = cat_config.get("title", "Other")
         if cat_title not in categories or not categories[cat_title]:
             continue
@@ -190,12 +244,46 @@ def generate_release_notes(config, categories, uncategorized, contributors, prev
 
         lines.append("")
 
+    # Add frontend changes if any (before "Other Changes")
+    if frontend_changes and len(frontend_changes) > 0:
+        lines.append("### 🎨 Frontend Changes")
+        lines.append("")
+        for change in frontend_changes:
+            lines.append(change)
+        lines.append("")
+
     # Add uncategorized PRs if any
     if uncategorized:
         lines.append("### Other Changes")
         lines.append("")
         for pr in uncategorized:
             lines.append(format_change_line(pr, config))
+        lines.append("")
+
+    # Add deferred categories (after "Other Changes")
+    for cat_config in deferred_categories:
+        cat_title = cat_config.get("title", "Other")
+        if cat_title not in categories or not categories[cat_title]:
+            continue
+
+        prs = categories[cat_title]
+        lines.append(f"### {cat_title}")
+        lines.append("")
+
+        # Check if category should be collapsed
+        collapse_after = cat_config.get("collapse-after")
+        if collapse_after and len(prs) > collapse_after:
+            lines.append("<details>")
+            lines.append(f"<summary>{len(prs)} changes</summary>")
+            lines.append("")
+
+        for pr in prs:
+            lines.append(format_change_line(pr, config))
+
+        if collapse_after and len(prs) > collapse_after:
+            lines.append("")
+            lines.append("</details>")
+
         lines.append("")
 
     # Add contributors section using template
@@ -254,13 +342,31 @@ def main():
         categories, uncategorized = categorize_prs(prs, config)
         print(f"Categorized into {len(categories)} categories, {len(uncategorized)} uncategorized")  # noqa: T201
 
-        # Get contributors
+        # Extract frontend changes and contributors
+        frontend_changes_list, frontend_contributors_set = extract_frontend_changes(prs)
+        print(  # noqa: T201
+            f"Found {len(frontend_changes_list)} frontend changes "
+            f"from {len(frontend_contributors_set)} contributors"
+        )
+
+        # Get server contributors
         contributors_list = get_contributors(prs, config)
-        print(f"Found {len(contributors_list)} contributors")  # noqa: T201
+
+        # Merge frontend contributors with server contributors
+        all_contributors = set(contributors_list) | frontend_contributors_set
+        contributors_list = sorted(all_contributors)
+        print(  # noqa: T201
+            f"Total {len(contributors_list)} unique contributors (server + frontend)"
+        )
 
         # Generate formatted notes
         notes = generate_release_notes(
-            config, categories, uncategorized, contributors_list, previous_tag
+            config,
+            categories,
+            uncategorized,
+            contributors_list,
+            previous_tag,
+            frontend_changes_list,
         )
 
     # Output to GitHub Actions
