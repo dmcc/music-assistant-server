@@ -57,15 +57,11 @@ runs:
         VERSION: ${{ inputs.version }}
         PREVIOUS_TAG: ${{ inputs.previous-tag }}
         BRANCH: ${{ inputs.branch }}
+        BASE_NOTES: ${{ steps.generate.outputs.release-notes }}
+        SERVER_CONTRIBUTORS: ${{ steps.generate.outputs.contributors }}
       run: |
-        # Get the base release notes
-        BASE_NOTES="${{ steps.generate.outputs.release-notes }}"
-        SERVER_CONTRIBUTORS="${{ steps.generate.outputs.contributors }}"
-
-        # Save base notes to file
-        cat > /tmp/base_notes.md << 'EOF'
-        ${{ steps.generate.outputs.release-notes }}
-        EOF
+        # Save base notes to file from environment variable
+        echo "$BASE_NOTES" > /tmp/base_notes.md
 
         # Create temp files for frontend changes
         FRONTEND_FILE=$(mktemp)
