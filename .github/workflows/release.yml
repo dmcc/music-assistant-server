@@ -167,50 +167,12 @@ jobs:
           name: release-dists
           path: dist/
 
-      - name: Determine previous version tag and temporarily hide other channels
+      - name: Determine previous version tag
         id: prev_version
         run: |
           CHANNEL="${{ inputs.channel }}"
 
-          # Define patterns for each channel
-          case "$CHANNEL" in
-            stable)
-              KEEP_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+$'
-              HIDE_PATTERN='\.(b|dev)[0-9]+'
-              ;;
-            beta)
-              KEEP_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+\.b[0-9]+$'
-              HIDE_PATTERN='(^[0-9]+\.[0-9]+\.[0-9]+$|\.dev[0-9]+$)'
-              ;;
-            nightly)
-              KEEP_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+$'
-              HIDE_PATTERN='(^[0-9]+\.[0-9]+\.[0-9]+$|\.b[0-9]+$)'
-              ;;
-          esac
-
-          echo "📋 Hiding releases from other channels for Release Drafter..."
-
-          # Get all releases and temporarily convert other channels to draft
-          gh release list --limit 100 --json tagName,isDraft,isPrerelease | jq -c '.[]' | while read -r release; do
-            TAG=$(echo "$release" | jq -r '.tagName')
-            IS_DRAFT=$(echo "$release" | jq -r '.isDraft')
-
-            # Skip if already a draft
-            if [ "$IS_DRAFT" = "true" ]; then
-              continue
-            fi
-
-            # Check if this release should be hidden (not matching current channel pattern)
-            if echo "$TAG" | grep -vE "$KEEP_PATTERN" > /dev/null 2>&1; then
-              echo "  Temporarily hiding: $TAG"
-              # Store this tag so we can restore it later
-              echo "$TAG" >> /tmp/hidden_releases.txt
-              # Mark as draft (makes it invisible to Release Drafter)
-              gh release edit "$TAG" --draft=true
-            fi
-          done
-
-          # Now find the previous tag of this channel
+          # Find the previous tag of this channel
           case "$CHANNEL" in
             stable)
               PREV_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
@@ -232,8 +194,6 @@ jobs:
             echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
             echo "has_prev_tag=true" >> $GITHUB_OUTPUT
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release with Release Drafter
         id: create_release
@@ -246,24 +206,6 @@ jobs:
           commitish: ${{ needs.validate-and-build.outputs.branch }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Restore hidden releases
-        if: always()
-        run: |
-          if [ -f /tmp/hidden_releases.txt ]; then
-            echo "📋 Restoring hidden releases..."
-            while read -r TAG; do
-              if [ -n "$TAG" ]; then
-                echo "  Restoring: $TAG"
-                gh release edit "$TAG" --draft=false
-              fi
-            done < /tmp/hidden_releases.txt
-            echo "✅ All releases restored"
-          else
-            echo "No releases to restore"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add channel context to release notes
         if: steps.prev_version.outputs.has_prev_tag == 'true'

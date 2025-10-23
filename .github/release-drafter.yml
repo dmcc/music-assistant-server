@@ -3,6 +3,10 @@ change-template: '- $TITLE (by @$AUTHOR in #$NUMBER)'
 # Note: prerelease flag is set dynamically by the workflow based on channel
 # This config is used for all release channels (stable, beta, nightly)
 
+# Filter releases by commitish (branch) to only show releases from the same branch
+# This allows us to have separate release notes for stable/beta/nightly channels
+filter-by-commitish: true
+
 # Exclude bots from contributors list
 exclude-contributors:
   - dependabot

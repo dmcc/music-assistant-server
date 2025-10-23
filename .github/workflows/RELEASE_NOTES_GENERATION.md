@@ -2,13 +2,33 @@
 
 ## Overview
 
-The release workflow generates release notes **specific to each channel** by only including commits since the last release of that same channel. It uses your **Release Drafter configuration** (`.github/release-drafter.yml`) for label-based categorization.
+The release workflow generates release notes **specific to each channel** by leveraging Release Drafter's `filter-by-commitish` feature. This ensures that:
+
+- **Stable** releases only show commits from the `stable` branch
+- **Beta** releases only show commits from the `dev` branch since the last beta
+- **Nightly** releases only show commits from the `dev` branch since the last nightly
+
+The workflow uses your **Release Drafter configuration** (`.github/release-drafter.yml`) for label-based categorization and formatting.
 
 ## How It Works
 
-### 1. Previous Release Detection
+### 1. Filter by Branch (commitish)
 
-The workflow identifies the previous release for each channel using tag patterns:
+The `.github/release-drafter.yml` file includes:
+
+```yaml
+filter-by-commitish: true
+```
+
+This tells Release Drafter to only consider releases that have the same `target_commitish` (branch) when calculating the commit range. Combined with setting the `commitish` parameter to the appropriate branch:
+
+- **Stable releases**: Use `commitish: stable` → Only sees releases created from `stable` branch
+- **Beta releases**: Use `commitish: dev` → Only sees releases created from `dev` branch
+- **Nightly releases**: Use `commitish: dev` → Only sees releases created from `dev` branch
+
+### 2. Previous Release Detection
+
+The workflow also manually identifies the previous release for context headers using tag patterns:
 
 #### Stable Channel
 - **Pattern**: `^[0-9]+\.[0-9]+\.[0-9]+$` (e.g., `2.1.0`, `2.0.5`)
@@ -25,20 +45,26 @@ The workflow identifies the previous release for each channel using tag patterns
 - **Branch**: `dev`
 - **Finds**: Latest nightly release (`.devYYYYMMDD` suffix)
 
-### 2. Release Notes Generation
+### 3. Release Notes Generation
 
-The workflow generates notes in three steps:
+Release Drafter automatically:
 
-1. **Find PRs in commit range**: Extracts PR numbers from merge commits between the previous tag and HEAD
-2. **Categorize by labels**: Applies the category rules from `.github/release-drafter.yml`:
+1. **Finds commit range**: Determines commits between the previous release (same branch) and HEAD
+2. **Extracts PRs**: Identifies all merged pull requests in that range
+3. **Categorizes by labels**: Applies the category rules from `.github/release-drafter.yml`:
    - ⚠ Breaking Changes (`breaking-change` label)
    - 🚀 New Providers (`new-provider` label)
    - 🚀 Features and enhancements (`feature`, `enhancement`, `new-feature` labels)
    - 🐛 Bugfixes (`bugfix` label)
    - 🧰 Maintenance (`ci`, `documentation`, `maintenance`, `dependencies` labels)
-3. **Add contributors**: Lists all unique contributors from the PRs
+4. **Lists contributors**: Adds all unique contributors from the PRs
 
-### 3. What This Means
+The workflow then enhances these notes by:
+- Adding a context header showing the previous release
+- Extracting and appending frontend changes from frontend update PRs
+- Merging and deduplicating contributors from both server and frontend
+
+### 4. What This Means
 
 #### ✅ Stable Release Notes
 - Include **only commits since the last stable release**
@@ -58,13 +84,23 @@ The workflow generates notes in three steps:
 
 ## Release Drafter Configuration
 
-✅ The workflow **uses your `.github/release-drafter.yml` configuration** for:
+✅ The workflow **uses Release Drafter natively** with the following key configuration:
+
+```yaml
+# .github/release-drafter.yml
+filter-by-commitish: true  # Only consider releases from the same branch
+```
+
+This configuration, combined with setting the appropriate `commitish` parameter when calling Release Drafter, ensures:
+- **No temporary hiding of releases** (avoids updating publish dates)
+- **Native Release Drafter filtering** (robust and reliable)
+- **Branch-based separation** (stable vs dev commits are naturally separated)
+
+The workflow also uses your existing configuration for:
 - Category definitions (labels → section headers)
 - Category titles and emoji
 - Excluded contributors (bots)
 - PR title format
-
-The workflow manually implements the categorization logic to ensure channel-specific commit ranges while preserving your custom formatting.
 
 ## Example Release Notes Format
 
