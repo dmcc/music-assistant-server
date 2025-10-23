@@ -32,7 +32,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopencore-amrnb-dev \
     libopencore-amrwb-dev \
     libshine-dev \
-    # Additional audio processing
+    # Audio processing and filters
+    librubberband-dev \
+    libbs2b-dev \
+    libsamplerate0-dev \
+    libmysofa-dev \
+    libjack-jackd2-dev \
+    libpulse-dev \
+    # Additional libraries
     libbluray-dev \
     libxml2-dev \
     # SSL/TLS support for HTTPS
@@ -63,6 +70,11 @@ RUN set -x \
         --enable-libvo-amrwbenc \
         # Audio filters and resampling
         --enable-libsoxr \
+        --enable-librubberband \
+        --enable-libbs2b \
+        --enable-libmysofa \
+        --enable-libjack \
+        --enable-libpulse \
         # SSL/TLS support for HTTPS
         --enable-openssl \
         # Protocols needed for streaming
@@ -129,6 +141,14 @@ RUN set -x \
         libopencore-amrnb0 \
         libopencore-amrwb0 \
         libvo-amrwbenc0 \
+        # Audio processing libraries
+        librubberband2 \
+        libbs2b0 \
+        libsamplerate0 \
+        libmysofa1 \
+        libjack-jackd2-0 \
+        libpulse0 \
+        # Additional libraries
         libbluray2 \
         libxml2 \
     && apt-get clean \
