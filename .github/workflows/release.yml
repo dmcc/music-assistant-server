@@ -15,6 +15,21 @@ on:
           - stable
           - beta
           - nightly
+  workflow_call:
+    inputs:
+      version:
+        description: "Version number (e.g., 1.2.3, 1.2.3.b1, or 1.2.3.dev1)"
+        required: true
+        type: string
+      channel:
+        description: "Release channel"
+        required: true
+        type: string
+    secrets:
+      PYPI_TOKEN:
+        required: true
+      PRIVILEGED_GITHUB_TOKEN:
+        required: true
 
 env:
   PYTHON_VERSION: "3.12"
