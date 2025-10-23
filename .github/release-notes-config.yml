@@ -1,11 +1,13 @@
+# Release Notes Configuration
+#
+# This file configures the automatic release notes generation for all release channels
+# (stable, beta, and nightly). The custom release notes generator action reads this file
+# to determine how to categorize pull requests and format the release notes.
+#
+# Location: .github/actions/generate-release-notes/generate_notes.py
+
+# Template for individual PR entries in the release notes
 change-template: '- $TITLE (by @$AUTHOR in #$NUMBER)'
-
-# Note: prerelease flag is set dynamically by the workflow based on channel
-# This config is used for all release channels (stable, beta, nightly)
-
-# Filter releases by commitish (branch) to only show releases from the same branch
-# This allows us to have separate release notes for stable/beta/nightly channels
-filter-by-commitish: true
 
 # Exclude bots from contributors list
 exclude-contributors:

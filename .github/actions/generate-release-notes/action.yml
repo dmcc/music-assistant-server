@@ -1,0 +1,187 @@
+name: 'Generate Release Notes'
+description: 'Generate complete release notes with PR categorization, frontend changes, and merged contributors'
+inputs:
+  version:
+    description: 'The version being released'
+    required: true
+  previous-tag:
+    description: 'The previous release tag to compare against'
+    required: false
+    default: ''
+  branch:
+    description: 'The branch being released from'
+    required: true
+  channel:
+    description: 'The release channel (stable, beta, nightly)'
+    required: true
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+outputs:
+  release-notes:
+    description: 'The complete generated release notes including frontend changes'
+    value: ${{ steps.finalize.outputs.release-notes }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6.0.0
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install PyGithub PyYAML
+
+    - name: Generate base release notes
+      id: generate
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        VERSION: ${{ inputs.version }}
+        PREVIOUS_TAG: ${{ inputs.previous-tag }}
+        BRANCH: ${{ inputs.branch }}
+        CHANNEL: ${{ inputs.channel }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python3 ${{ github.action_path }}/generate_notes.py
+
+    - name: Extract and merge frontend changes
+      id: frontend
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        VERSION: ${{ inputs.version }}
+        PREVIOUS_TAG: ${{ inputs.previous-tag }}
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        # Get the base release notes
+        BASE_NOTES="${{ steps.generate.outputs.release-notes }}"
+        SERVER_CONTRIBUTORS="${{ steps.generate.outputs.contributors }}"
+
+        # Save base notes to file
+        cat > /tmp/base_notes.md << 'EOF'
+        ${{ steps.generate.outputs.release-notes }}
+        EOF
+
+        # Create temp files for frontend changes
+        FRONTEND_FILE=$(mktemp)
+        CONTRIBUTORS_FILE=$(mktemp)
+
+        # Start with server contributors
+        echo "$SERVER_CONTRIBUTORS" | tr ',' '\n' > "$CONTRIBUTORS_FILE"
+
+        # Find frontend update PRs
+        echo "📦 Looking for frontend update PRs..."
+
+        if [ -z "$PREVIOUS_TAG" ]; then
+          echo "No previous tag, searching recent merged PRs"
+          gh pr list --state merged --limit 100 --json number,title,body --jq '.[] | select(.title | test("^⬆️ Update music-assistant-frontend to [0-9]")) | {number: .number, title: .title, body: .body}' > /tmp/frontend_prs.json
+        else
+          echo "Searching between $PREVIOUS_TAG and $BRANCH"
+          git log $PREVIOUS_TAG..$BRANCH --oneline --merges | grep -oP '#\K[0-9]+' > /tmp/pr_numbers.txt || echo ""
+
+          > /tmp/frontend_prs.json
+          while read -r PR_NUM; do
+            if [ -n "$PR_NUM" ]; then
+              PR_DATA=$(gh pr view $PR_NUM --json number,title,body 2>/dev/null || echo "")
+              if [ -n "$PR_DATA" ]; then
+                if echo "$PR_DATA" | jq -e '.title | test("^⬆️ Update music-assistant-frontend to [0-9]")' > /dev/null 2>&1; then
+                  echo "$PR_DATA" >> /tmp/frontend_prs.json
+                fi
+              fi
+            fi
+          done < /tmp/pr_numbers.txt
+        fi
+
+        # Process frontend PRs
+        if [ -s /tmp/frontend_prs.json ]; then
+          echo "## 🎨 Frontend Changes" > "$FRONTEND_FILE"
+          echo "" >> "$FRONTEND_FILE"
+
+          while IFS= read -r pr_json; do
+            if [ -n "$pr_json" ]; then
+              BODY=$(echo "$pr_json" | jq -r '.body')
+
+              # Extract bullet points, excluding headers and dependabot lines
+              echo "$BODY" | grep -E '^[[:space:]]*[•-]' | \
+                grep -v '🙇' | \
+                grep -viE '^[[:space:]]*[•-][[:space:]]*Chore\(deps' | \
+                head -20 >> "$FRONTEND_FILE" || true
+
+              # Extract contributors
+              echo "$BODY" | grep -oP '@[a-zA-Z0-9_-]+' >> "$CONTRIBUTORS_FILE" || true
+            fi
+          done < /tmp/frontend_prs.json
+
+          # Check if we found changes
+          if [ $(wc -l < "$FRONTEND_FILE") -gt 3 ]; then
+            echo "✅ Found frontend changes"
+
+            # Merge contributors (deduplicate and format)
+            MERGED_CONTRIBUTORS=$(sort -u "$CONTRIBUTORS_FILE" | sed 's/^/@/' | paste -sd ", " -)
+
+            # Find contributors section in base notes
+            CONTRIB_LINE=$(grep -n "## :bow: Thanks to our contributors" /tmp/base_notes.md | head -1 | cut -d: -f1 || echo "")
+
+            if [ -n "$CONTRIB_LINE" ]; then
+              # Split notes at contributors section
+              head -n $((CONTRIB_LINE - 1)) /tmp/base_notes.md > /tmp/before_contrib.md
+
+              # Build final notes
+              {
+                cat /tmp/before_contrib.md
+                echo ""
+                cat "$FRONTEND_FILE"
+                echo ""
+                echo "## :bow: Thanks to our contributors"
+                echo ""
+                echo "Special thanks to the following contributors who helped with this release:"
+                echo ""
+                echo "$MERGED_CONTRIBUTORS"
+              } > /tmp/final_notes.md
+            else
+              # No contributors section, just append
+              {
+                cat /tmp/base_notes.md
+                echo ""
+                cat "$FRONTEND_FILE"
+              } > /tmp/final_notes.md
+            fi
+
+            echo "has_frontend_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ No frontend changes found"
+            cp /tmp/base_notes.md /tmp/final_notes.md
+            echo "has_frontend_changes=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "ℹ️ No frontend PRs found"
+          cp /tmp/base_notes.md /tmp/final_notes.md
+          echo "has_frontend_changes=false" >> $GITHUB_OUTPUT
+        fi
+
+        # Cleanup
+        rm -f "$FRONTEND_FILE" "$CONTRIBUTORS_FILE" /tmp/frontend_prs.json /tmp/pr_numbers.txt /tmp/before_contrib.md
+
+    - name: Output final notes
+      id: finalize
+      shell: bash
+      run: |
+        # Read the final notes and output them
+        FINAL_NOTES=$(cat /tmp/final_notes.md)
+
+        # Use multiline output format
+        cat >> $GITHUB_OUTPUT << 'EOF'
+        release-notes<<NOTES_EOF
+        EOF
+        cat /tmp/final_notes.md >> $GITHUB_OUTPUT
+        cat >> $GITHUB_OUTPUT << 'EOF'
+        NOTES_EOF
+        EOF
+
+        # Cleanup
+        rm -f /tmp/base_notes.md /tmp/final_notes.md
+
+        echo "✅ Release notes generation complete"

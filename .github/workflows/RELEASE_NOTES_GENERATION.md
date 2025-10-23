@@ -8,13 +8,13 @@ The release workflow generates release notes **specific to each channel** by lev
 - **Beta** releases only show commits from the `dev` branch since the last beta
 - **Nightly** releases only show commits from the `dev` branch since the last nightly
 
-The workflow uses your **Release Drafter configuration** (`.github/release-drafter.yml`) for label-based categorization and formatting.
+The workflow uses the **release notes configuration** (`.github/release-notes-config.yml`) for label-based categorization and formatting.
 
 ## How It Works
 
 ### 1. Filter by Branch (commitish)
 
-The `.github/release-drafter.yml` file includes:
+The `.github/release-notes-config.yml` file includes:
 
 ```yaml
 filter-by-commitish: true
@@ -51,7 +51,7 @@ Release Drafter automatically:
 
 1. **Finds commit range**: Determines commits between the previous release (same branch) and HEAD
 2. **Extracts PRs**: Identifies all merged pull requests in that range
-3. **Categorizes by labels**: Applies the category rules from `.github/release-drafter.yml`:
+3. **Categorizes by labels**: Applies the category rules from `.github/release-notes-config.yml`:
    - ⚠ Breaking Changes (`breaking-change` label)
    - 🚀 New Providers (`new-provider` label)
    - 🚀 Features and enhancements (`feature`, `enhancement`, `new-feature` labels)
@@ -82,25 +82,32 @@ The workflow then enhances these notes by:
 - **Do NOT include** beta or stable releases in between
 - Example: `2.1.0.dev20251022` → `2.1.0.dev20251023` only shows dev branch commits since yesterday
 
-## Release Drafter Configuration
+## Release Notes Configuration
 
-✅ The workflow **uses Release Drafter natively** with the following key configuration:
+✅ The workflow uses a **custom release notes generator** that reads `.github/release-notes-config.yml`:
 
 ```yaml
-# .github/release-drafter.yml
-filter-by-commitish: true  # Only consider releases from the same branch
+# .github/release-notes-config.yml
+change-template: '- $TITLE (by @$AUTHOR in #$NUMBER)'
+
+categories:
+  - title: "⚠ Breaking Changes"
+    labels: ['breaking-change']
+  # ... more categories
 ```
 
-This configuration, combined with setting the appropriate `commitish` parameter when calling Release Drafter, ensures:
-- **No temporary hiding of releases** (avoids updating publish dates)
-- **Native Release Drafter filtering** (robust and reliable)
-- **Branch-based separation** (stable vs dev commits are naturally separated)
+This approach ensures:
+- **Full control over commit range** (explicit previous tag parameter)
+- **No mysterious failures** (clear Python code you can debug)
+- **Consistent formatting** (same config format as Release Drafter used)
+- **Branch-based separation** (stable vs dev commits via explicit tag comparison)
 
-The workflow also uses your existing configuration for:
+The configuration includes:
 - Category definitions (labels → section headers)
 - Category titles and emoji
 - Excluded contributors (bots)
 - PR title format
+- Collapse settings for long categories
 
 ## Example Release Notes Format
 

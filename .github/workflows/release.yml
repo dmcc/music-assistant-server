@@ -195,188 +195,50 @@ jobs:
             echo "has_prev_tag=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create Release with Release Drafter
-        id: create_release
-        uses: release-drafter/release-drafter@v6
+      - name: Generate complete release notes
+        id: generate_notes
+        uses: ./.github/actions/generate-release-notes
         with:
           version: ${{ inputs.version }}
-          tag: ${{ inputs.version }}
-          name: ${{ inputs.version }}
-          prerelease: ${{ needs.validate-and-build.outputs.is_prerelease }}
-          commitish: ${{ needs.validate-and-build.outputs.branch }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          previous-tag: ${{ steps.prev_version.outputs.prev_tag }}
+          branch: ${{ needs.validate-and-build.outputs.branch }}
+          channel: ${{ inputs.channel }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Add channel context to release notes
-        if: steps.prev_version.outputs.has_prev_tag == 'true'
-        run: |
-          PREV_TAG="${{ steps.prev_version.outputs.prev_tag }}"
-          CHANNEL="${{ inputs.channel }}"
-          VERSION="${{ inputs.version }}"
-          REPO="${{ github.repository }}"
-
-          # Get current release notes from Release Drafter
-          gh release view "$VERSION" --json body --jq .body > /tmp/current_notes.md
-
-          # Prepend channel context
-          echo "## 📦 ${CHANNEL^} Release" > /tmp/new_notes.md
-          echo "" >> /tmp/new_notes.md
-          echo "_Changes since [$PREV_TAG](https://github.com/$REPO/releases/tag/$PREV_TAG)_" >> /tmp/new_notes.md
-          echo "" >> /tmp/new_notes.md
-          echo "___" >> /tmp/new_notes.md
-          echo "" >> /tmp/new_notes.md
-          cat /tmp/current_notes.md >> /tmp/new_notes.md
-
-          # Update the release
-          gh release edit "$VERSION" --notes-file /tmp/new_notes.md
-
-          echo "✅ Added channel context to release notes"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract and append frontend changes to release notes
-        id: update_notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "📦 Extracting frontend changes from PRs..."
-
-          # Get the current release body
-          RELEASE_BODY=$(gh release view "${{ inputs.version }}" --json body --jq .body)
-
-          # Find all frontend update PRs since the previous tag
-          PREV_TAG="${{ steps.prev_version.outputs.prev_tag }}"
-
-          # Create temp files
-          FRONTEND_FILE=$(mktemp)
-          CONTRIBUTORS_FILE=$(mktemp)
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, searching recent merged PRs"
-            gh pr list --state merged --limit 100 --json number,title,body --jq '.[] | select(.title | test("^⬆️ Update music-assistant-frontend to [0-9]")) | {number: .number, title: .title, body: .body}' > /tmp/frontend_prs.json
-          else
-            # Get PR numbers from merge commits since previous tag
-            echo "Searching for frontend PRs between $PREV_TAG and HEAD"
-            git log $PREV_TAG..HEAD --oneline --merges | grep -oP '#\K[0-9]+' > /tmp/pr_numbers.txt || echo ""
-
-            # Fetch details for frontend update PRs
-            > /tmp/frontend_prs.json
-            while read -r PR_NUM; do
-              if [ -n "$PR_NUM" ]; then
-                PR_DATA=$(gh pr view $PR_NUM --json number,title,body 2>/dev/null || echo "")
-                if [ -n "$PR_DATA" ]; then
-                  if echo "$PR_DATA" | jq -e '.title | test("^⬆️ Update music-assistant-frontend to [0-9]")' > /dev/null 2>&1; then
-                    echo "$PR_DATA" >> /tmp/frontend_prs.json
-                  fi
-                fi
-              fi
-            done < /tmp/pr_numbers.txt
-          fi
-
-          # Extract contributors from server release notes (existing)
-          echo "$RELEASE_BODY" | grep -oP '@[a-zA-Z0-9_-]+' | sort -u > "$CONTRIBUTORS_FILE" || true
-
-          # Process each frontend PR and extract changes + contributors
-          if [ -s /tmp/frontend_prs.json ]; then
-            echo "## 🎨 Frontend Changes" > "$FRONTEND_FILE"
-            echo "" >> "$FRONTEND_FILE"
-
-            while IFS= read -r pr_json; do
-              if [ -n "$pr_json" ]; then
-                BODY=$(echo "$pr_json" | jq -r '.body')
-
-                # Extract bullet points from the body, excluding:
-                # - Section headers (🙇)
-                # - Dependabot dependency lines (starting with "Chore(deps")
-                echo "$BODY" | grep -E '^[[:space:]]*[•-]' | \
-                  grep -v '🙇' | \
-                  grep -viE '^[[:space:]]*[•-][[:space:]]*Chore\(deps' | \
-                  head -20 >> "$FRONTEND_FILE" || true
-
-                # Extract contributors from frontend PR body
-                echo "$BODY" | grep -oP '@[a-zA-Z0-9_-]+' >> "$CONTRIBUTORS_FILE" || true
-              fi
-            done < /tmp/frontend_prs.json
-
-            # Check if we actually found any changes
-            if [ $(wc -l < "$FRONTEND_FILE") -gt 3 ]; then
-              echo "✅ Found frontend changes"
-
-              # Deduplicate and sort contributors
-              MERGED_CONTRIBUTORS=$(sort -u "$CONTRIBUTORS_FILE" | paste -sd ", " -)
-
-              # Split release body into parts (before and after contributors section)
-              echo "$RELEASE_BODY" > /tmp/original_notes.md
-
-              # Find where the contributors section starts
-              CONTRIB_LINE=$(grep -n "## :bow: Thanks to our contributors" /tmp/original_notes.md | head -1 | cut -d: -f1 || echo "")
-
-              if [ -n "$CONTRIB_LINE" ]; then
-                # Extract everything before contributors section
-                head -n $((CONTRIB_LINE - 1)) /tmp/original_notes.md > /tmp/notes_before_contrib.md
-
-                # Build new release notes with frontend changes and merged contributors
-                {
-                  cat /tmp/notes_before_contrib.md
-                  echo ""
-                  cat "$FRONTEND_FILE"
-                  echo ""
-                  echo "## :bow: Thanks to our contributors"
-                  echo ""
-                  echo "Special thanks to the following contributors who helped with this release:"
-                  echo ""
-                  echo "$MERGED_CONTRIBUTORS"
-                } > /tmp/updated_notes.md
-              else
-                # No contributors section found, just append frontend changes
-                {
-                  cat /tmp/original_notes.md
-                  echo ""
-                  cat "$FRONTEND_FILE"
-                } > /tmp/updated_notes.md
-              fi
-
-              # Update the release
-              gh release edit "${{ inputs.version }}" --notes-file /tmp/updated_notes.md
-
-              echo "✅ Release notes updated with frontend changes and merged contributors"
-            else
-              echo "ℹ️ No frontend bullet points found"
-            fi
-          else
-            echo "ℹ️ No frontend update PRs found in this release"
-          fi
-
-          # Cleanup
-          rm -f "$FRONTEND_FILE" "$CONTRIBUTORS_FILE" /tmp/frontend_prs.json /tmp/pr_numbers.txt /tmp/updated_notes.md /tmp/original_notes.md /tmp/notes_before_contrib.md
-
-      - name: Upload artifacts to release
+      - name: Create GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
+          name: ${{ inputs.version }}
+          body: ${{ steps.generate_notes.outputs.release-notes }}
+          prerelease: ${{ needs.validate-and-build.outputs.is_prerelease }}
+          target_commitish: ${{ needs.validate-and-build.outputs.branch }}
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Output release info
+        run: |
+          echo "✅ Created release ${{ inputs.version }}"
+          echo "Release URL: ${{ steps.create_release.outputs.url }}"
+
   pypi-publish:
     name: Publish release to PyPI (stable releases only)
     runs-on: ubuntu-latest
-    needs:
-      - validate-and-build
-      - create-release
-    if: ${{ inputs.channel == 'stable' }}
+    needs: create-release
+    if: inputs.channel == 'stable'
+    permissions:
+      id-token: write
     steps:
-      - name: Retrieve release distributions
+      - name: Download distributions
         uses: actions/download-artifact@v5
         with:
           name: release-dists
           path: dist/
 
-      - name: Publish release to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.13.0
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_TOKEN }}
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
   build-and-push-container-image:
     name: Build and push Music Assistant Server container to ghcr.io
