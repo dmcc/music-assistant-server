@@ -102,6 +102,7 @@ jobs:
       contents: write
       pull-requests: read
       packages: write
+      id-token: write  # Required for PyPI publishing
     uses: ./.github/workflows/release.yml
     with:
       version: ${{ needs.check-and-release.outputs.version }}
