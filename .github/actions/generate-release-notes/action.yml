@@ -44,7 +44,9 @@ runs:
         BRANCH: ${{ inputs.branch }}
         CHANNEL: ${{ inputs.channel }}
         GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
       run: |
+        chmod +x ${{ github.action_path }}/generate_notes.py
         python3 ${{ github.action_path }}/generate_notes.py
 
     - name: Extract and merge frontend changes
