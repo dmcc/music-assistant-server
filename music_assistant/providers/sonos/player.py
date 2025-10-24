@@ -90,15 +90,13 @@ class SonosQueue:
 
     def enqueue_next(self, current_item_id: str | None, next_item: PlayerMedia) -> None:
         """Enqueue the next item in the sonos queue."""
-        if current_item_id is None:
+        current_index = next(
+            (i for i, item in enumerate(self._items) if item.queue_item_id == current_item_id),
+            None,
+        )
+        if current_index is None:
             self._items.append(next_item)
         else:
-            current_index = next(
-                (i for i, item in enumerate(self._items) if item.queue_item_id == current_item_id),
-                None,
-            )
-            if current_index is None:
-                raise IndexError("Current item id not found in sonos queue.")
             prev_items = self.items[: current_index + 1]
             # because the next item could potentially have been overwritten,
             # we rebuild the deque here
