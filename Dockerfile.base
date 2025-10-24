@@ -117,6 +117,7 @@ RUN set -x \
         ca-certificates \
         libjemalloc2 \
         tzdata \
+        wget \
         # cifs utils and libnfs are needed for smb and nfs support (file provider)
         cifs-utils \
         libnfs13 \
@@ -125,9 +126,6 @@ RUN set -x \
         libssl-dev \
         # libsndfile needed for librosa audio file support (smartfades)
         libsndfile1 \
-        # snapcast server and client for snapcast provider
-        snapserver \
-        snapclient \
         # Audio codec runtime libraries (needed for FFmpeg)
         libfdk-aac2 \
         libmp3lame0 \
@@ -151,8 +149,27 @@ RUN set -x \
         # Additional libraries
         libbluray2 \
         libxml2 \
+        # Snapcast dependencies
+        libvorbisidec1 \
+        libflac12 \
+        libavahi-client3 \
+        libavahi-common3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Snapcast 0.34.0 from GitHub releases (requires at least 0.27)
+ARG SNAPCAST_VERSION=0.34.0
+ARG TARGETARCH
+RUN set -x \
+    && if [ "$TARGETARCH" = "arm64" ]; then \
+        SNAPCAST_ARCH="arm64"; \
+    else \
+        SNAPCAST_ARCH="amd64"; \
+    fi \
+    && wget -q "https://github.com/badaix/snapcast/releases/download/v${SNAPCAST_VERSION}/snapserver_${SNAPCAST_VERSION}-1_${SNAPCAST_ARCH}_bookworm.deb" -O /tmp/snapserver.deb \
+    && wget -q "https://github.com/badaix/snapcast/releases/download/v${SNAPCAST_VERSION}/snapclient_${SNAPCAST_VERSION}-1_${SNAPCAST_ARCH}_bookworm.deb" -O /tmp/snapclient.deb \
+    && dpkg -i /tmp/snapserver.deb /tmp/snapclient.deb \
+    && rm /tmp/snapserver.deb /tmp/snapclient.deb
 
 # Copy FFmpeg binaries and libraries from builder stage
 COPY --from=ffmpeg-builder /usr/local/bin/ffmpeg /usr/local/bin/
