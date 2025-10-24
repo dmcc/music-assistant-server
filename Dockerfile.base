@@ -150,6 +150,7 @@ RUN set -x \
         libbluray2 \
         libxml2 \
         # Snapcast dependencies
+        libasound2 \
         libvorbisidec1 \
         libflac12 \
         libavahi-client3 \
