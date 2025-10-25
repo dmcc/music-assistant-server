@@ -490,7 +490,7 @@ class StreamsController(CoreController):
             # restarting (or completely failing) the audio stream by keeping the buffer short.
             # this is reported to be an issue especially with Chromecast players.
             # see for example: https://github.com/music-assistant/support/issues/3717
-            extra_input_args=["-readrate", "1.0", "-readrate_initial_burst", "2"],
+            extra_input_args=["-readrate", "1.0", "-readrate_initial_burst", "5"],
         ):
             try:
                 await resp.write(chunk)
@@ -804,7 +804,7 @@ class StreamsController(CoreController):
         # like https hosts and it also offers the pre-announce 'bell'
         return f"{self.base_url}/announcement/{player_id}.{content_type.value}"
 
-    @use_buffer(30, 2)
+    @use_buffer(30, 5)
     async def get_queue_flow_stream(
         self,
         queue: PlayerQueue,
@@ -1229,7 +1229,7 @@ class StreamsController(CoreController):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, gc.collect)
 
-    @use_buffer(30, 2)
+    @use_buffer(30, 5)
     async def get_queue_item_stream_with_smartfade(
         self,
         queue_item: QueueItem,
