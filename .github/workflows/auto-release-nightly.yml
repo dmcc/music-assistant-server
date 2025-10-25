@@ -61,28 +61,26 @@ jobs:
         run: |
           LAST_TAG="${{ steps.check_commits.outputs.last_tag }}"
 
-          # Get today's date in YYYYMMDD format
+          # Get today's date in YYYYMMDD format and current hour (00-23) for uniqueness
           TODAY=$(date -u +%Y%m%d)
-
-          # Get last 3 characters of git hash for uniqueness
-          GIT_HASH=$(git rev-parse --short=3 HEAD)
+          HOUR=$(date -u +%H)
 
           if [ -z "$LAST_TAG" ]; then
-            # No previous nightly tag, start with 0.0.1.devYYYYMMDDXXX
-            NEW_VERSION="0.0.1.dev${TODAY}${GIT_HASH}"
+            # No previous nightly tag, start with 0.0.1.devYYYYMMDDHH
+            NEW_VERSION="0.0.1.dev${TODAY}${HOUR}"
           else
-            # Extract version number (handles tags like "v1.2.3.dev20251023abc" or "1.2.3.dev20251023")
+            # Extract version number (handles tags like "v1.2.3.dev2025102514" or "1.2.3.dev20251023")
             VERSION=$(echo "$LAST_TAG" | sed 's/^v//')
 
-            # Check if it's a .devYYYYMMDD version (with or without suffix)
-            if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)([0-9a-f]+)?$ ]]; then
+            # Check if it's a .devYYYYMMDD version (with or without hour suffix)
+            if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)$ ]]; then
               BASE_VERSION="${BASH_REMATCH[1]}"
 
-              # Use today's date and current git hash for the new dev version
-              NEW_VERSION="${BASE_VERSION}.dev${TODAY}${GIT_HASH}"
+              # Use today's date and current hour for the new dev version
+              NEW_VERSION="${BASE_VERSION}.dev${TODAY}${HOUR}"
             else
-              # Fallback: treat as base version and add .devYYYYMMDDXXX
-              NEW_VERSION="${VERSION}.dev${TODAY}${GIT_HASH}"
+              # Fallback: treat as base version and add .devYYYYMMDDHH
+              NEW_VERSION="${VERSION}.dev${TODAY}${HOUR}"
             fi
           fi
 
