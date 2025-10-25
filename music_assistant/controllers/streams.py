@@ -74,7 +74,7 @@ from music_assistant.helpers.smart_fades import (
     SmartFadesMixer,
     SmartFadesMode,
 )
-from music_assistant.helpers.util import get_ip_addresses, select_free_port
+from music_assistant.helpers.util import get_ip_addresses, get_total_system_memory, select_free_port
 from music_assistant.helpers.webserver import Webserver
 from music_assistant.models.core_controller import CoreController
 from music_assistant.models.music_provider import MusicProvider
@@ -94,6 +94,9 @@ isfile = wrap(os.path.isfile)
 
 CONF_ALLOW_BUFFER: Final[str] = "allow_buffering"
 CONF_ALLOW_CROSSFADE_SAME_ALBUM: Final[str] = "allow_crossfade_same_album"
+
+# Calculate total system memory once at module load time
+TOTAL_SYSTEM_MEMORY_GB: Final[float] = get_total_system_memory()
 
 
 def parse_pcm_info(content_type: str) -> tuple[int, int, int]:
@@ -181,7 +184,7 @@ class StreamsController(CoreController):
             ConfigEntry(
                 key=CONF_ALLOW_BUFFER,
                 type=ConfigEntryType.BOOLEAN,
-                default_value=False,
+                default_value=TOTAL_SYSTEM_MEMORY_GB >= 8.0,
                 label="Allow (in-memory) buffering of (track) audio",
                 description="By default, Music Assistant tries to be as resource "
                 "efficient as possible when streaming audio, especially considering "
