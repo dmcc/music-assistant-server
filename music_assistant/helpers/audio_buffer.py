@@ -253,9 +253,10 @@ class AudioBuffer:
             self._data_available.notify_all()
             self._space_available.notify_all()
 
-        # Run garbage collection in executor to reclaim memory from large buffers
+        # Run garbage collection in background to reclaim memory from large buffers
+        # Don't await it to avoid blocking during task cancellation
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, gc.collect)
+        loop.run_in_executor(None, gc.collect)
 
     async def set_eof(self) -> None:
         """Signal that no more data will be added to the buffer."""
