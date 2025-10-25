@@ -429,8 +429,9 @@ async def get_media_stream_with_buffer(
     filter_params: list[str] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Get audio stream for given media details as raw PCM with buffering."""
-    LOGGER.debug(
-        "get_media_stream_with_buffer: Starting for %s (seek: %s)",
+    LOGGER.log(
+        VERBOSE_LOG_LEVEL,
+        "buffered_media_stream: Starting for %s (seek: %s)",
         streamdetails.uri,
         seek_position,
     )
@@ -477,8 +478,7 @@ async def get_media_stream_with_buffer(
         if not existing_buffer.is_valid(checksum, seek_position):
             LOGGER.log(
                 VERBOSE_LOG_LEVEL,
-                "get_media_stream_with_buffer: Existing buffer invalid for %s "
-                "(seek: %s, discarded: %s)",
+                "buffered_media_stream: Existing buffer invalid for %s (seek: %s, discarded: %s)",
                 streamdetails.uri,
                 seek_position,
                 existing_buffer._discarded_chunks,
@@ -488,7 +488,7 @@ async def get_media_stream_with_buffer(
             existing_buffer = None
         else:
             LOGGER.debug(
-                "get_media_stream_with_buffer: Reusing existing buffer for %s - "
+                "buffered_media_stream: Reusing existing buffer for %s - "
                 "available: %ss, seek: %s, discarded: %s",
                 streamdetails.uri,
                 existing_buffer.seconds_available,
@@ -503,8 +503,8 @@ async def get_media_stream_with_buffer(
         # otherwise we would need to fill the buffer up to the seek position first
         # which is not efficient.
         LOGGER.debug(
-            "get_media_stream_with_buffer: No existing buffer and seek >60s for %s, "
-            "starting normal stream",
+            "buffered_media_stream: No existing buffer and seek >60s for %s, "
+            "starting normal (unbuffered) stream",
             streamdetails.uri,
         )
         async for chunk in get_media_stream(
@@ -520,7 +520,7 @@ async def get_media_stream_with_buffer(
     if not existing_buffer:
         # create new audio buffer and start fill task
         LOGGER.debug(
-            "get_media_stream_with_buffer: Creating new buffer for %s",
+            "buffered_media_stream: Creating new buffer for %s",
             streamdetails.uri,
         )
         audio_buffer = AudioBuffer(pcm_format, checksum)
@@ -537,7 +537,7 @@ async def get_media_stream_with_buffer(
     finally:
         LOGGER.log(
             VERBOSE_LOG_LEVEL,
-            "get_media_stream_with_buffer: Completed, yielded %s chunks",
+            "buffered_media_stream: Completed, yielded %s chunks",
             chunk_count,
         )
 

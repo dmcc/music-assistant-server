@@ -794,7 +794,7 @@ class StreamsController(CoreController):
         # like https hosts and it also offers the pre-announce 'bell'
         return f"{self.base_url}/announcement/{player_id}.{content_type.value}"
 
-    @use_buffer(30, 4)
+    @use_buffer(30, 2)
     async def get_queue_flow_stream(
         self,
         queue: PlayerQueue,
@@ -1119,9 +1119,9 @@ class StreamsController(CoreController):
             "Starting queue item stream for %s (%s)"
             " - using buffer: %s"
             " - using fade-in: %s"
-            " - volume normalization: %s",
+            " - using volume normalization: %s",
             queue_item.name,
-            queue_item.uri,
+            queue_item.streamdetails.uri,
             allow_buffer,
             streamdetails.fade_in,
             streamdetails.volume_normalization_mode,
@@ -1147,6 +1147,7 @@ class StreamsController(CoreController):
         fade_in_buffer = b""
         bytes_received = 0
         aborted = False
+        stream_started_at = asyncio.get_event_loop().time()
         try:
             async for chunk in media_stream_gen:
                 bytes_received += len(chunk)
@@ -1156,6 +1157,12 @@ class StreamsController(CoreController):
                     # so for example the next track can be enqueued
                     self.mass.player_queues.track_loaded_in_buffer(
                         queue_item.queue_id, queue_item.queue_item_id
+                    )
+                    self.logger.debug(
+                        "First audio chunk received for %s (%s) after %.2f seconds",
+                        queue_item.name,
+                        queue_item.streamdetails.uri,
+                        asyncio.get_event_loop().time() - stream_started_at,
                     )
                 # handle optional fade-in
                 if streamdetails.fade_in:
@@ -1184,9 +1191,10 @@ class StreamsController(CoreController):
             seconds_streamed = bytes_received / pcm_format.pcm_sample_size
             streamdetails.seconds_streamed = seconds_streamed
             self.logger.debug(
-                "stream %s for %s - seconds streamed: %s",
+                "stream %s for %s in %.2f seconds - seconds streamed: %s",
                 "aborted" if aborted else "finished",
                 streamdetails.uri,
+                asyncio.get_event_loop().time() - stream_started_at,
                 seconds_streamed,
             )
             # report stream to provider
@@ -1200,7 +1208,7 @@ class StreamsController(CoreController):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, gc.collect)
 
-    @use_buffer(30, 4)
+    @use_buffer(30, 2)
     async def get_queue_item_stream_with_smartfade(
         self,
         queue_item: QueueItem,
