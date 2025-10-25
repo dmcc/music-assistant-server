@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(f"{MASS_LOGGER_NAME}.audio_buffer")
 
-DEFAULT_MAX_BUFFER_SIZE_SECONDS: int = 60 * 5  # 5 minutes
+DEFAULT_MAX_BUFFER_SIZE_SECONDS: int = 60 * 8  # 8 minutes
 
 
 class AudioBuffer:
@@ -105,6 +105,9 @@ class AudioBuffer:
         inactivity_timeout = 60 * 5  # 5 minutes
         if time_since_access > (inactivity_timeout - 30):
             # Buffer is close to being cleared, don't reuse it
+            return False
+
+        if seek_position > self._discarded_chunks + self.max_size_seconds:
             return False
 
         # Check if the seek position has already been discarded
