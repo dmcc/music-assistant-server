@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, cast
@@ -21,17 +22,16 @@ from music_assistant_models.enums import (
     ConfigEntryType,
     ContentType,
     EventType,
-    MediaType,
     ProviderFeature,
     ProviderType,
     StreamType,
 )
 from music_assistant_models.errors import UnsupportedFeaturedException
 from music_assistant_models.media_items import AudioFormat
+from music_assistant_models.streamdetails import StreamMetadata
 
 from music_assistant.constants import CONF_ENTRY_WARN_PREVIEW
 from music_assistant.helpers.process import AsyncProcess, check_output
-from music_assistant.models.player import PlayerMedia
 from music_assistant.models.plugin import PluginProvider, PluginSource
 from music_assistant.providers.spotify.helpers import get_librespot_binary
 
@@ -154,8 +154,8 @@ class SpotifyConnectProvider(PluginProvider):
                 bit_depth=16,
                 channels=2,
             ),
-            metadata=PlayerMedia(
-                f"Spotify Connect | {connect_name}",
+            metadata=StreamMetadata(
+                title=f"Spotify Connect | {connect_name}",
             ),
             stream_type=StreamType.NAMED_PIPE,
             path=self.named_pipe,
@@ -504,12 +504,18 @@ class SpotifyConnectProvider(PluginProvider):
             else:
                 image_url = None
             if self._source_details.metadata is None:
-                self._source_details.metadata = PlayerMedia(uri, media_type=MediaType.TRACK)
+                self._source_details.metadata = StreamMetadata(uri=uri, title=title)
             self._source_details.metadata.uri = uri
             self._source_details.metadata.title = title
             self._source_details.metadata.artist = artist
             self._source_details.metadata.album = album
             self._source_details.metadata.image_url = image_url
+            self._source_details.metadata.description = json_data.get(
+                "episode_metadata_fields", {}
+            ).get("description")
+            self._source_details.metadata.duration = json_data.get("duration_ms", 0) * 0.001
+            self._source_details.metadata.elapsed_time = json_data.get("position", None)
+            self._source_details.metadata.elapsed_time_last_updated = time.time()
             if self._source_details.in_use_by:
                 # tell connected player to update metadata
                 self.mass.players.trigger_player_update(self._source_details.in_use_by)
