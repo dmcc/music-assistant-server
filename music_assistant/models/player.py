@@ -931,6 +931,7 @@ class Player(ABC):
         ):
             return PlayerMedia(
                 uri=source.metadata.uri or source.id,
+                media_type=MediaType.PLUGIN_SOURCE,
                 title=source.metadata.title,
                 artist=source.metadata.artist,
                 album=source.metadata.album,
@@ -949,7 +950,10 @@ class Player(ABC):
 
         if active_queue and (current_item := active_queue.current_item):
             item_image_url = (
-                self.mass.metadata.get_image_url(current_item.image) if current_item.image else None
+                # the image format needs to be 500x500 jpeg for maximum compatibility with players
+                self.mass.metadata.get_image_url(current_item.image, size=500, image_format="png")
+                if current_item.image
+                else None
             )
             if current_item.streamdetails and (
                 stream_metadata := current_item.streamdetails.stream_metadata
@@ -957,6 +961,7 @@ class Player(ABC):
                 # handle stream metadata in streamdetails (e.g. for radio stream)
                 return PlayerMedia(
                     uri=current_item.uri,
+                    media_type=current_item.media_type,
                     title=stream_metadata.title or current_item.name,
                     artist=stream_metadata.artist,
                     album=stream_metadata.album or current_item.name,
@@ -972,10 +977,14 @@ class Player(ABC):
                 # normal media item
                 return PlayerMedia(
                     uri=str(media_item.uri),
+                    media_type=media_item.media_type,
                     title=media_item.name,
                     artist=getattr(media_item, "artist_str", None),
                     album=album.name if (album := getattr(media_item, "album", None)) else None,
-                    image_url=self.mass.metadata.get_image_url(current_item.media_item.image)
+                    # the image format needs to be 500x500 jpeg for maximum player compatibility
+                    image_url=self.mass.metadata.get_image_url(
+                        current_item.media_item.image, size=500, image_format="jpeg"
+                    )
                     or item_image_url
                     if current_item.media_item.image
                     else item_image_url,
@@ -989,6 +998,7 @@ class Player(ABC):
             # fallback to basic current item details
             return PlayerMedia(
                 uri=current_item.uri,
+                media_type=current_item.media_type,
                 title=current_item.name,
                 image_url=item_image_url,
                 duration=current_item.duration,
@@ -998,7 +1008,24 @@ class Player(ABC):
                 elapsed_time_last_updated=active_queue.elapsed_time_last_updated,
             )
         # return native current media if no group/queue is active
-        return self._current_media
+        if self._current_media:
+            return PlayerMedia(
+                uri=self._current_media.uri,
+                media_type=self._current_media.media_type,
+                title=self._current_media.title,
+                artist=self._current_media.artist,
+                album=self._current_media.album,
+                image_url=self._current_media.image_url,
+                duration=self._current_media.duration,
+                source_id=self._current_media.source_id or self._active_source,
+                queue_item_id=self._current_media.queue_item_id,
+                elapsed_time=self._current_media.elapsed_time or int(self.elapsed_time)
+                if self.elapsed_time
+                else None,
+                elapsed_time_last_updated=self._current_media.elapsed_time_last_updated
+                or self.elapsed_time_last_updated,
+            )
+        return None
 
     @cached_property
     @final

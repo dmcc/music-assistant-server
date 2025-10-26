@@ -245,41 +245,29 @@ class ChromecastPlayer(Player):
             return
         if self.extra_attributes.get(ATTR_ANNOUNCEMENT_IN_PROGRESS):
             return
-        if not (queue := self.mass.player_queues.get_active_queue(self.player_id)):
+        if not (current_media := self.current_media):
             return
-        if not (current_item := queue.current_item):
-            return
-        if not (queue.flow_mode or current_item.media_type == MediaType.RADIO):
+        if not (
+            "/flow/" in self._attr_current_media.uri
+            or self.current_media.media_type
+            in (
+                MediaType.RADIO,
+                MediaType.PLUGIN_SOURCE,
+            )
+        ):
+            # only update metadata for streams without known duration
             return
         self._attr_poll_interval = 2
         media_controller = self.cc.media_controller
         # update metadata of current item chromecast
-        image_url = ""
-        if (streamdetails := current_item.streamdetails) and streamdetails.stream_metadata:
-            album = current_item.media_item.name if current_item.media_item else ""
-            artist = streamdetails.stream_metadata.artist or ""
-            title = streamdetails.stream_metadata.title or ""
-            if streamdetails.stream_metadata.album:
-                album = streamdetails.stream_metadata.album
-            if streamdetails.stream_metadata.image_url:
-                image_url = streamdetails.stream_metadata.image_url
-        elif media_item := current_item.media_item:
-            album = _album.name if (_album := getattr(media_item, "album", None)) else ""
-            artist = getattr(media_item, "artist_str", "")
-            title = media_item.name
-        else:
-            album = ""
-            artist = ""
-            title = current_item.name
-        flow_meta_checksum = f"{current_item.queue_item_id}-{album}-{artist}-{title}-{image_url}"
+        title = current_media.title or "Music Assistant"
+        artist = current_media.artist or ""
+        album = current_media.album or ""
+        image_url = current_media.image_url or MASS_LOGO_ONLINE
+        flow_meta_checksum = f"{current_media.uri}-{album}-{artist}-{title}-{image_url}"
         if self.flow_meta_checksum != flow_meta_checksum:
             # only update if something changed
             self.flow_meta_checksum = flow_meta_checksum
-            image_url = image_url or (
-                self.mass.metadata.get_image_url(current_item.image, size=512)
-                if current_item.image
-                else MASS_LOGO_ONLINE
-            )
             queuedata = {
                 "type": "PLAY",
                 "mediaSessionId": media_controller.status.media_session_id,
@@ -302,7 +290,7 @@ class ChromecastPlayer(Player):
             # In flow mode, all queue tracks are sent to the player as continuous stream.
             # add a special 'command' item to the queue
             # this allows for on-player next buttons/commands to still work
-            cmd_next_url = self.mass.streams.get_command_url(queue.queue_id, "next")
+            cmd_next_url = self.mass.streams.get_command_url(self.player_id, "next")
             msg = {
                 "type": "QUEUE_INSERT",
                 "mediaSessionId": media_controller.status.media_session_id,

@@ -638,7 +638,11 @@ class SqueezelitePlayer(Player):
                         SlimPreset(
                             uri=media_item.uri,
                             text=media_item.name,
-                            icon=self.mass.metadata.get_image_url(media_item.image),
+                            icon=(
+                                self.mass.metadata.get_image_url(media_item.image)
+                                if media_item.image
+                                else ""
+                            ),
                         )
                     )
                 except MusicAssistantError:
