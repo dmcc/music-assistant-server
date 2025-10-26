@@ -941,7 +941,7 @@ class PlayerQueuesController(CoreController):
             key=queue_id, provider=self.domain, category=CACHE_CATEGORY_PLAYER_QUEUE_STATE
         ):
             try:
-                queue = PlayerQueue.from_cache(prev_state)
+                queue = PlayerQueue.from_dict(prev_state)
                 prev_items = await self.mass.cache.get(
                     key=queue_id,
                     provider=self.domain,
