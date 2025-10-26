@@ -236,18 +236,18 @@ jobs:
             if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)$ ]]; then
               BASE="${BASH_REMATCH[1]}"
               DATE="${BASH_REMATCH[2]}"
-              TITLE="$BASE Nightly $DATE"
+              TITLE="$BASE NIGHTLY $DATE"
             else
-              TITLE="$VERSION Nightly"
+              TITLE="$VERSION NIGHTLY"
             fi
           elif [[ "$CHANNEL" == "beta" ]]; then
             # Extract base version and beta number from X.Y.ZbN
             if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)b([0-9]+)$ ]]; then
               BASE="${BASH_REMATCH[1]}"
               BETA_NUM="${BASH_REMATCH[2]}"
-              TITLE="$BASE Beta $BETA_NUM"
+              TITLE="$BASE BETA $BETA_NUM"
             else
-              TITLE="$VERSION Beta"
+              TITLE="$VERSION BETA"
             fi
           else
             # Stable release - just use the version
