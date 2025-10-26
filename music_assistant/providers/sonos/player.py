@@ -688,6 +688,13 @@ class SonosPlayer(Player):
             # the player has nothing loaded at all (empty queue and no service active)
             self._attr_active_source = None
 
+        # special case: Sonos reports PAUSED state when MA stopped playback
+        if (
+            active_service == MusicService.MUSIC_ASSISTANT
+            and self._attr_playback_state == PlaybackState.PAUSED
+        ):
+            self._attr_playback_state = PlaybackState.IDLE
+
         # parse current media
         self._attr_elapsed_time = self.client.player.group.position
         self._attr_elapsed_time_last_updated = time.time()
