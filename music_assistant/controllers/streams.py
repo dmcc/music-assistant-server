@@ -97,6 +97,7 @@ CONF_ALLOW_CROSSFADE_SAME_ALBUM: Final[str] = "allow_crossfade_same_album"
 
 # Calculate total system memory once at module load time
 TOTAL_SYSTEM_MEMORY_GB: Final[float] = get_total_system_memory()
+CONF_ALLOW_BUFFER_DEFAULT = TOTAL_SYSTEM_MEMORY_GB >= 8.0
 
 
 def parse_pcm_info(content_type: str) -> tuple[int, int, int]:
@@ -184,7 +185,7 @@ class StreamsController(CoreController):
             ConfigEntry(
                 key=CONF_ALLOW_BUFFER,
                 type=ConfigEntryType.BOOLEAN,
-                default_value=TOTAL_SYSTEM_MEMORY_GB >= 8.0,
+                default_value=CONF_ALLOW_BUFFER_DEFAULT,
                 label="Allow (in-memory) buffering of (track) audio",
                 description="By default, Music Assistant tries to be as resource "
                 "efficient as possible when streaming audio, especially considering "
@@ -1127,7 +1128,9 @@ class StreamsController(CoreController):
         streamdetails.volume_normalization_gain_correct = gain_correct
 
         allow_buffer = bool(
-            self.mass.config.get_raw_core_config_value(self.domain, CONF_ALLOW_BUFFER, False)
+            self.mass.config.get_raw_core_config_value(
+                self.domain, CONF_ALLOW_BUFFER, CONF_ALLOW_BUFFER_DEFAULT
+            )
             and streamdetails.duration
         )
 
