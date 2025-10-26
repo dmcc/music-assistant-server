@@ -949,6 +949,16 @@ class PlayerQueuesController(CoreController):
                     default=[],
                 )
                 queue_items = [QueueItem.from_cache(x) for x in prev_items]
+                if queue.enqueued_media_items:
+                    # we need to restore the MediaItem objects for the enqueued media items
+                    restored_enqueued_items = []
+                    for item in queue.enqueued_media_items:
+                        if isinstance(item, dict):
+                            restored_item = media_from_dict(item)
+                            restored_enqueued_items.append(restored_item)
+                        else:
+                            restored_enqueued_items.append(item)
+                    queue.enqueued_media_items = restored_enqueued_items
             except Exception as err:
                 self.logger.warning(
                     "Failed to restore the queue(items) for %s - %s",
