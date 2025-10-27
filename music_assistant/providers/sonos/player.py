@@ -390,7 +390,8 @@ class SonosPlayer(Player):
 
         :param position: The position to seek to, in seconds.
         """
-        await self.client.player.group.seek(position)
+        # sonos expects milliseconds
+        await self.client.player.group.seek(position * 1000)
 
     async def play_media(
         self,
