@@ -150,9 +150,9 @@ jobs:
 
           echo "Waiting for $PACKAGE version $VERSION to be available on PyPI..."
 
-          # Retry for up to 10 minutes (20 attempts with 30 second intervals)
+          # Retry for up to 20 minutes (20 attempts with 60 second intervals)
           MAX_ATTEMPTS=20
-          SLEEP_DURATION=30
+          SLEEP_DURATION=60
           ATTEMPT=1
 
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
@@ -167,7 +167,7 @@ jobs:
                 echo "✅ Package $PACKAGE version $VERSION is available on PyPI"
 
                 # Additional verification: try to download the package
-                if python3 -m pip download --no-deps --dry-run "$PACKAGE==$VERSION" > /dev/null 2>&1; then
+                if python3 -m pip download --no-deps "$PACKAGE==$VERSION" > /dev/null 2>&1; then
                   echo "✅ Package $PACKAGE==$VERSION can be installed"
                   exit 0
                 else
