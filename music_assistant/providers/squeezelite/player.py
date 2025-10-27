@@ -91,7 +91,6 @@ class SqueezelitePlayer(Player):
             PlayerFeature.MULTI_DEVICE_DSP,
             PlayerFeature.VOLUME_SET,
             PlayerFeature.PAUSE,
-            PlayerFeature.VOLUME_MUTE,
             PlayerFeature.ENQUEUE,
             PlayerFeature.GAPLESS_PLAYBACK,
             PlayerFeature.GAPLESS_DIFFERENT_SAMPLERATE,
