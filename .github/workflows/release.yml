@@ -1,7 +1,3 @@
-permissions:
-  actions: write
-  contents: write
-
 name: Create Release
 
 on:

@@ -241,6 +241,7 @@ jobs:
     needs: check-and-release
     if: needs.check-and-release.outputs.should_release == 'true'
     permissions:
+      actions: write
       contents: write
       pull-requests: read
       packages: write
