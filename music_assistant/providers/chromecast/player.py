@@ -9,6 +9,7 @@ from uuid import UUID
 
 from music_assistant_models.enums import MediaType, PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.errors import PlayerUnavailableError
+from music_assistant_models.player import PlayerSource
 from pychromecast import IDLE_APP_ID
 from pychromecast.controllers.media import STREAM_TYPE_BUFFERED, STREAM_TYPE_LIVE
 from pychromecast.controllers.multizone import MultizoneController
@@ -74,6 +75,7 @@ class ChromecastPlayer(Player):
             PlayerFeature.PAUSE,
             PlayerFeature.NEXT_PREVIOUS,
             PlayerFeature.ENQUEUE,
+            PlayerFeature.SEEK,
         }
         self._attr_name = self.cast_info.friendly_name
         self._attr_available = False
@@ -126,13 +128,17 @@ class ChromecastPlayer(Player):
         """Send PAUSE command to given player."""
         await asyncio.to_thread(self.cc.media_controller.pause)
 
-    async def next(self) -> None:
+    async def next_track(self) -> None:
         """Handle NEXT TRACK command for given player."""
         await asyncio.to_thread(self.cc.media_controller.queue_next)
 
-    async def previous(self) -> None:
+    async def previous_track(self) -> None:
         """Handle PREVIOUS TRACK command for given player."""
         await asyncio.to_thread(self.cc.media_controller.queue_prev)
+
+    async def seek(self, position: int) -> None:
+        """Handle SEEK command on the player."""
+        await asyncio.to_thread(self.cc.media_controller.seek, position)
 
     async def power(self, powered: bool) -> None:
         """Send POWER command to given player."""
@@ -385,7 +391,7 @@ class ChromecastPlayer(Player):
                     self.mass.loop.call_soon_threadsafe(child.update_state)
         self.mass.loop.call_soon_threadsafe(self.update_state)
 
-    def on_new_media_status(self, status: MediaStatus) -> None:
+    def on_new_media_status(self, status: MediaStatus) -> None:  # noqa: PLR0915
         """Handle updated MediaStatus."""
         self.logger.log(
             VERBOSE_LOG_LEVEL,
@@ -430,7 +436,21 @@ class ChromecastPlayer(Player):
         elif self.cc.app_id in (MASS_APP_ID, APP_MEDIA_RECEIVER):
             self._attr_active_source = self.player_id
         else:
-            self._attr_active_source = self.cc.app_display_name
+            app_name = self.cc.app_display_name or "Unknown App"
+            app_id = app_name.lower().replace(" ", "_")
+            self._attr_active_source = app_id
+            has_controls = app_name in ("Spotify", "Qobuz", "YouTube Music", "Deezer", "Tidal")
+            if not any(source.id == app_id for source in self._attr_source_list):
+                self._attr_source_list.append(
+                    PlayerSource(
+                        id=app_id,
+                        name=app_name,
+                        passive=True,
+                        can_play_pause=has_controls,
+                        can_seek=has_controls,
+                        can_next_previous=has_controls,
+                    )
+                )
 
         if status.content_id and not status.player_is_idle:
             self.set_current_media(
