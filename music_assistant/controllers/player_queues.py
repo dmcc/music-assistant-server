@@ -1244,6 +1244,14 @@ class PlayerQueuesController(CoreController):
         if queue.state == PlaybackState.PLAYING and queue.index_in_buffer is not None:
             # if the queue is playing,
             # ensure to (re)queue the next track because it might have changed
+            if queue.next_item and queue.next_item == self.get_item(
+                queue_id, queue.index_in_buffer
+            ):
+                self.logger.warning(
+                    "Skipping enqueue of next item on queue %s, "
+                    "because the player has already loaded a different item in the buffer",
+                    self._queues[queue_id].display_name,
+                )
             if next_item := self.get_next_item(queue_id, queue.index_in_buffer):
                 self._enqueue_next_item(queue_id, next_item)
 
@@ -1607,9 +1615,6 @@ class PlayerQueuesController(CoreController):
                     retries -= 1
                     await asyncio.sleep(1)
 
-                if next_item := await self.load_next_queue_item(queue_id, item_id_in_buffer):
-                    self._enqueue_next_item(queue_id, next_item)
-
             except QueueEmpty:
                 return
 
@@ -1854,19 +1859,27 @@ class PlayerQueuesController(CoreController):
         changed_keys = get_changed_keys(prev_state, new_state)
         with suppress(KeyError):
             changed_keys.remove("next_item_id")
+
         # return early if nothing changed
         if len(changed_keys) == 0:
             return
 
         # signal update and store state
+        send_update = True
         if changed_keys == {"elapsed_time"}:
-            # do not send full updates if only time was updated
-            self.mass.signal_event(
-                EventType.QUEUE_TIME_UPDATED,
-                object_id=queue_id,
-                data=queue.elapsed_time,
-            )
-        else:
+            # only elapsed time changed, do not send full queue update
+            send_update = False
+            prev_time = prev_state.get("elapsed_time") or 0
+            cur_time = new_state.get("elapsed_time") or 0
+            if abs(cur_time - prev_time) > 2:
+                # send dedicated event for time updates when seeking
+                self.mass.signal_event(
+                    EventType.QUEUE_TIME_UPDATED,
+                    object_id=queue_id,
+                    data=queue.elapsed_time,
+                )
+
+        if send_update:
             self.signal_update(queue_id)
 
         # store the new state
