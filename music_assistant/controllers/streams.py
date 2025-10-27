@@ -479,6 +479,27 @@ class StreamsController(CoreController):
         # this final ffmpeg process in the chain will convert the raw, lossless PCM audio into
         # the desired output format for the player including any player specific filter params
         # such as channels mixing, DSP, resampling and, only if needed, encoding to lossy formats
+
+        # readrate filter input args to control buffering
+        # we need to slowly feed the music to avoid the player stopping and later
+        # restarting (or completely failing) the audio stream by keeping the buffer short.
+        # this is reported to be an issue especially with Chromecast players.
+        # see for example: https://github.com/music-assistant/support/issues/3717
+        user_agent = request.headers.get("User-Agent", "")
+        if queue_item.media_type == MediaType.RADIO:
+            # keep very short buffer for radio streams
+            # to keep them (more or less) realtime and prevent time outs
+            read_rate_input_args = ["-readrate", "1.0", "-readrate_initial_burst", "3"]
+        elif "Network_Module" in user_agent or "transferMode.dlna.org" in request.headers:
+            # and ofcourse we have an exception of the exception. Where most players actually NEED
+            # the readrate filter to avoid disconnecting, some other players (DLNA/MusicCast)
+            # actually fail when the filter is used. So we disable it completely for those players.
+            read_rate_input_args = None  # disable readrate for DLNA players
+        else:
+            # when using smart fades, we need to read the audio a bit faster
+            # to account for the crossfade processing time but still limit enough
+            read_rate_input_args = ["-readrate", "1.2", "-readrate_initial_burst", "30"]
+
         first_chunk_received = False
         async for chunk in get_ffmpeg_stream(
             audio_input=audio_input,
@@ -490,6 +511,7 @@ class StreamsController(CoreController):
                 input_format=pcm_format,
                 output_format=output_format,
             ),
+            extra_input_args=read_rate_input_args,
         ):
             try:
                 await resp.write(chunk)
@@ -1259,7 +1281,7 @@ class StreamsController(CoreController):
         crossfade_data = self._crossfade_data.get(queue.queue_id)
 
         if crossfade_data and crossfade_data.queue_item_id != queue_item.queue_item_id:
-            # edge case alert: the next item changed just while we were preloading
+            # edge case alert: the next item changed just while we were preloading/crossfading
             self.logger.warning(
                 "Skipping crossfade data for queue %s - next item changed!", queue.display_name
             )
