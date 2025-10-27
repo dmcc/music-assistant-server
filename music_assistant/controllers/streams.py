@@ -119,7 +119,6 @@ class CrossfadeData:
     fade_in_size: int
     pcm_format: AudioFormat
     queue_item_id: str
-    session_id: str
 
 
 class StreamsController(CoreController):
@@ -466,7 +465,6 @@ class StreamsController(CoreController):
             audio_input = self.get_queue_item_stream_with_smartfade(
                 queue_item=queue_item,
                 pcm_format=pcm_format,
-                session_id=session_id,
                 smart_fades_mode=smart_fades_mode,
                 standard_crossfade_duration=standard_crossfade_duration,
             )
@@ -527,9 +525,6 @@ class StreamsController(CoreController):
         queue = self.mass.player_queues.get(queue_id)
         if not queue:
             raise web.HTTPNotFound(reason=f"Unknown Queue: {queue_id}")
-        session_id = request.match_info["session_id"]
-        if session_id != queue.session_id:
-            raise web.HTTPNotFound(reason=f"Unknown (or invalid) session: {session_id}")
         if not (queue_player := self.mass.players.get(queue_id)):
             raise web.HTTPNotFound(reason=f"Unknown Player: {queue_id}")
         start_queue_item_id = request.match_info["queue_item_id"]
@@ -1250,7 +1245,6 @@ class StreamsController(CoreController):
         self,
         queue_item: QueueItem,
         pcm_format: AudioFormat,
-        session_id: str | None = None,
         smart_fades_mode: SmartFadesMode = SmartFadesMode.SMART_FADES,
         standard_crossfade_duration: int = 10,
     ) -> AsyncGenerator[bytes, None]:
@@ -1263,10 +1257,10 @@ class StreamsController(CoreController):
         assert streamdetails
         crossfade_data = self._crossfade_data.get(queue.queue_id)
 
-        if crossfade_data and crossfade_data.session_id != session_id:
-            # invalidate expired crossfade data
+        if crossfade_data and crossfade_data.queue_item_id != queue_item.queue_item_id:
+            # edge case alert: the next item changed just while we were preloading
             self.logger.warning(
-                "Skipping crossfade data for queue %s - session mismatch ", queue.display_name
+                "Skipping crossfade data for queue %s - next item changed!", queue.display_name
             )
             crossfade_data = None
 
@@ -1432,7 +1426,6 @@ class StreamsController(CoreController):
                     fade_in_size=len(buffer),
                     pcm_format=pcm_format,
                     queue_item_id=next_queue_item.queue_item_id,
-                    session_id=session_id,
                 )
 
             except QueueEmpty:
