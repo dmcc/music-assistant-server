@@ -1241,17 +1241,11 @@ class PlayerQueuesController(CoreController):
         # without having to compare the entire list
         queue.items_last_updated = time.time()
         self.signal_update(queue_id, True)
-        if queue.state == PlaybackState.PLAYING and queue.index_in_buffer is not None:
+        if queue.state == PlaybackState.PLAYING and queue.index_in_buffer == queue.current_index:
             # if the queue is playing,
             # ensure to (re)queue the next track because it might have changed
-            if queue.next_item and queue.next_item == self.get_item(
-                queue_id, queue.index_in_buffer
-            ):
-                self.logger.warning(
-                    "Skipping enqueue of next item on queue %s, "
-                    "because the player has already loaded a different item in the buffer",
-                    self._queues[queue_id].display_name,
-                )
+            # note that we only do this if the player has loaded the current track
+            # if not, we wait until it has loaded to prevent conflicts
             if next_item := self.get_next_item(queue_id, queue.index_in_buffer):
                 self._enqueue_next_item(queue_id, next_item)
 
@@ -1614,6 +1608,14 @@ class PlayerQueuesController(CoreController):
                         break
                     retries -= 1
                     await asyncio.sleep(1)
+                if next_item := await self.load_next_queue_item(queue_id, item_id_in_buffer):
+                    self.logger.debug(
+                        "Preloaded next item %s for queue %s",
+                        next_item.name,
+                        queue.display_name,
+                    )
+                    # enqueue the next item on the player
+                    self._enqueue_next_item(queue_id, next_item)
 
             except QueueEmpty:
                 return
