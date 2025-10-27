@@ -75,6 +75,7 @@ from music_assistant.constants import (
     CONF_PRE_ANNOUNCE_CHIME_URL,
     CONF_VOLUME_CONTROL,
 )
+from music_assistant.helpers.cached_property import timed_cached_property
 from music_assistant.helpers.util import (
     get_changed_dataclass_values,
     validate_announcement_chime_url,
@@ -82,6 +83,7 @@ from music_assistant.helpers.util import (
 
 if TYPE_CHECKING:
     from .player_provider import PlayerProvider
+
 
 CONF_ENTRY_PRE_ANNOUNCE_CUSTOM_CHIME_URL = ConfigEntry(
     key=CONF_PRE_ANNOUNCE_CHIME_URL,
@@ -672,7 +674,7 @@ class Player(ABC):
         elif self.group_members:
             await self.set_members(player_ids_to_remove=self.group_members)
 
-    @cached_property
+    @property
     def synced_to(self) -> str | None:
         """
         Return the id of the player this player is synced to (sync leader).
@@ -773,7 +775,7 @@ class Player(ABC):
             return control.power_state
         return None
 
-    @cached_property
+    @property
     @final
     def volume_level(self) -> int | None:
         """
@@ -793,7 +795,7 @@ class Player(ABC):
             return control.volume_level
         return None
 
-    @cached_property
+    @property
     @final
     def volume_muted(self) -> bool | None:
         """
@@ -813,7 +815,7 @@ class Player(ABC):
             return control.volume_muted
         return None
 
-    @property
+    @timed_cached_property
     @final
     def active_source(self) -> str | None:
         """
@@ -825,7 +827,7 @@ class Player(ABC):
         # if the player is grouped/synced, use the active source of the group/parent player
         if parent_player_id := (self.active_group or self.synced_to):
             if parent_player := self.mass.players.get(parent_player_id):
-                return parent_player.active_source
+                return parent_player._active_source
         for plugin_source in self.mass.players.get_plugin_sources():
             if plugin_source.in_use_by == self.player_id:
                 return plugin_source.id
@@ -910,7 +912,7 @@ class Player(ABC):
         active_groups = self.active_groups
         return active_groups[0] if active_groups else None
 
-    @cached_property
+    @timed_cached_property
     @final
     def current_media(self) -> PlayerMedia | None:
         """
@@ -922,7 +924,7 @@ class Player(ABC):
         # if the player is grouped/synced, use the current_media of the group/parent player
         if parent_player_id := (self.active_group or self.synced_to):
             if parent_player := self.mass.players.get(parent_player_id):
-                return parent_player.current_media
+                return cast("PlayerMedia | None", parent_player.current_media)
         # if a pluginsource is currently active, return those details
         if (
             self.active_source
@@ -1057,7 +1059,7 @@ class Player(ABC):
             return str(conf)
         return PLAYER_CONTROL_NONE
 
-    @cached_property
+    @property
     @final
     def group_volume(self) -> int:
         """

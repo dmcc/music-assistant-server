@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 import logging
 import time
 from collections import deque
@@ -71,12 +70,6 @@ class AudioBuffer:
         if self._cancelled:
             return True
         return self._producer_task is not None and self._producer_task.cancelled()
-
-    @staticmethod
-    def _cleanup_chunks(chunks: deque[bytes]) -> None:
-        """Clear chunks and run garbage collection (runs in executor)."""
-        chunks.clear()
-        gc.collect()
 
     @property
     def chunk_size_bytes(self) -> int:
@@ -254,11 +247,13 @@ class AudioBuffer:
             chunk_count,
             self._producer_task is not None,
         )
-        # Cancel producer task if present
+        # Cancel producer task if present and wait for it to finish
+        # This ensures any subprocess cleanup happens on the main event loop
         if self._producer_task and not self._producer_task.done():
             self._producer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._producer_task
+
         # Cancel inactivity task if present
         if cancel_inactivity_task and self._inactivity_task and not self._inactivity_task.done():
             self._inactivity_task.cancel()
@@ -268,7 +263,6 @@ class AudioBuffer:
         async with self._lock:
             # Replace the deque instead of clearing it to avoid blocking
             # Clearing a large deque can take >100ms
-            old_chunks = self._chunks
             self._chunks = deque()
             self._discarded_chunks = 0
             self._eof_received = False
@@ -277,11 +271,6 @@ class AudioBuffer:
             # Notify all waiting tasks
             self._data_available.notify_all()
             self._space_available.notify_all()
-
-        # Clear the old deque and run garbage collection in background
-        # to avoid blocking the event loop
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, self._cleanup_chunks, old_chunks)
 
     async def set_eof(self) -> None:
         """Signal that no more data will be added to the buffer."""

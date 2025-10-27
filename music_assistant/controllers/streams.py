@@ -318,6 +318,9 @@ class StreamsController(CoreController):
                 ),
             ],
         )
+        # Start periodic garbage collection task
+        # This ensures memory from audio buffers and streams is cleaned up regularly
+        self.mass.call_later(900, self._periodic_garbage_collection)  # 15 minutes
 
     async def close(self) -> None:
         """Cleanup on exit."""
@@ -1092,6 +1095,14 @@ class StreamsController(CoreController):
                 filter_params=player_filter_params,
                 extra_input_args=["-y", "-re"],
             ):
+                if plugin_source.in_use_by != player_id:
+                    self.logger.info(
+                        "Aborting streaming PluginSource %s to %s "
+                        "- another player took over control",
+                        plugin_source_id,
+                        player_id,
+                    )
+                    break
                 yield chunk
         finally:
             self.logger.debug(
@@ -1232,9 +1243,7 @@ class StreamsController(CoreController):
                 if TYPE_CHECKING:  # avoid circular import
                     assert isinstance(music_prov, MusicProvider)
                 self.mass.create_task(music_prov.on_streamed(streamdetails))
-            # Run garbage collection in executor to reclaim memory from large buffers
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, gc.collect)
+            # Periodic GC task will handle memory cleanup every 15 minutes
 
     @use_buffer(30, 1)
     async def get_queue_item_stream_with_smartfade(
@@ -1256,6 +1265,9 @@ class StreamsController(CoreController):
 
         if crossfade_data and crossfade_data.session_id != session_id:
             # invalidate expired crossfade data
+            self.logger.warning(
+                "Skipping crossfade data for queue %s - session mismatch ", queue.display_name
+            )
             crossfade_data = None
 
         self.logger.debug(
@@ -1360,6 +1372,10 @@ class StreamsController(CoreController):
             try:
                 next_queue_item = await self.mass.player_queues.load_next_queue_item(
                     queue.queue_id, queue_item.queue_item_id
+                )
+                # set index_in_buffer to prevent our next track is overwritten while preloading
+                queue.index_in_buffer = self.mass.player_queues.index_by_id(
+                    queue.queue_id, next_queue_item.queue_item_id
                 )
                 next_queue_item_pcm_format = AudioFormat(
                     content_type=INTERNAL_PCM_FORMAT.content_type,
@@ -1577,5 +1593,24 @@ class StreamsController(CoreController):
         ):
             self.logger.debug("Skipping crossfade: sample rate mismatch")
             return False
-        # all checks passed, crossfade is enabled/allowed
+
         return True
+
+    async def _periodic_garbage_collection(self) -> None:
+        """Periodic garbage collection to free up memory from audio buffers and streams."""
+        self.logger.log(
+            VERBOSE_LOG_LEVEL,
+            "Running periodic garbage collection...",
+        )
+        # Run garbage collection in executor to avoid blocking the event loop
+        # Since this runs periodically (not in response to subprocess cleanup),
+        # it's safe to run in a thread without causing thread-safety issues
+        loop = asyncio.get_running_loop()
+        collected = await loop.run_in_executor(None, gc.collect)
+        self.logger.log(
+            VERBOSE_LOG_LEVEL,
+            "Garbage collection completed, collected %d objects",
+            collected,
+        )
+        # Schedule next run in 15 minutes
+        self.mass.call_later(900, self._periodic_garbage_collection)
