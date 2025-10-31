@@ -195,7 +195,7 @@ class RaopStream(AirPlayProtocol):
             if "end of stream reached" in line:
                 logger.debug("End of stream reached")
                 break
-            logger.debug(line)
+            logger.log(VERBOSE_LOG_LEVEL, line)
 
         # ensure we're cleaned up afterwards (this also logs the returncode)
         logger.debug("CLIRaop stderr reader ended")
