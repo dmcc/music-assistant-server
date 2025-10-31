@@ -45,6 +45,8 @@ class RaopStream(AirPlayProtocol):
 
     async def get_ntp(self) -> int:
         """Get current NTP timestamp from the CLI binary."""
+        # this can probably be removed now that we already get the ntp
+        # in python (within the stream session start)
         cli_binary = await get_cli_binary(self.player.protocol)
         # TODO: we can potentially also just generate this ourselves?
         self.prov.logger.debug("Getting NTP timestamp from %s CLI binary", self.player.protocol)
