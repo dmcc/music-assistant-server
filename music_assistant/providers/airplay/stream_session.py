@@ -252,7 +252,8 @@ class AirPlayStreamSession:
                 if first_chunk_received is False:
                     first_chunk_received = True
                     self.prov.logger.debug(
-                        "First audio chunk received after %.3fs, which is %.3fs before scheduled start time",
+                        "First audio chunk received after %.3fs, "
+                        "which is %.3fs before scheduled start time",
                         time.time() - stream_start_time,
                         time.time() - self.start_time,
                     )
