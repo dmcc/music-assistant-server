@@ -39,6 +39,20 @@ ANALYSIS_FPS = 100
 TIME_STRETCH_BPM_PERCENTAGE_THRESHOLD = 5.0
 
 
+def align_audio_to_frame_boundary(audio_data: bytes, pcm_format: AudioFormat) -> bytes:
+    """Align audio data to frame boundaries by truncating incomplete frames."""
+    bytes_per_sample = pcm_format.bit_depth // 8
+    frame_size = bytes_per_sample * pcm_format.channels
+    valid_bytes = (len(audio_data) // frame_size) * frame_size
+    if valid_bytes != len(audio_data):
+        logging.getLogger(__name__).debug(
+            "Truncating %d bytes from audio buffer to align to frame boundary",
+            len(audio_data) - valid_bytes,
+        )
+        return audio_data[:valid_bytes]
+    return audio_data
+
+
 class SmartFadesAnalyzer:
     """Smart fades analyzer that performs audio analysis."""
 
@@ -61,6 +75,10 @@ class SmartFadesAnalyzer:
         self.logger.debug(
             "Starting %s beat analysis for track : %s", fragment.name, stream_details_name
         )
+
+        # Validate input audio data is frame-aligned
+        audio_data = align_audio_to_frame_boundary(audio_data, pcm_format)
+
         fragment_duration = len(audio_data) / (pcm_format.pcm_sample_size)
         try:
             self.logger.log(
@@ -287,6 +305,9 @@ class SmartFadesMixer:
             pcm_format=pcm_format,
             reverse=True,
         )
+        # Ensure frame alignment after silence stripping
+        fade_out_part = align_audio_to_frame_boundary(fade_out_part, pcm_format)
+
         # strip silence from begin of audio of fade_in_part
         fade_in_part = await strip_silence(
             self.mass,
@@ -294,6 +315,8 @@ class SmartFadesMixer:
             pcm_format=pcm_format,
             reverse=False,
         )
+        # Ensure frame alignment after silence stripping
+        fade_in_part = align_audio_to_frame_boundary(fade_in_part, pcm_format)
         if mode == SmartFadesMode.STANDARD_CROSSFADE:
             # crossfade with standard crossfade
             return await self._default_crossfade(
