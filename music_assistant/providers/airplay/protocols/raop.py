@@ -178,12 +178,6 @@ class RaopStream(AirPlayProtocol):
         if not self._cli_proc:
             return
         async for line in self._cli_proc.iter_stderr():
-            if "elapsed milliseconds:" in line:
-                # this is received more or less every second while playing
-                millis = int(line.split("elapsed milliseconds: ")[1])
-                # note that this represents the total elapsed time of the streaming session
-                elapsed_time = millis / 1000
-                player.set_state_from_stream(elapsed_time=elapsed_time)
             if "set pause" in line or "Pause at" in line:
                 player.set_state_from_stream(state=PlaybackState.PAUSED)
             if "Restarted at" in line or "restarting w/ pause" in line:
