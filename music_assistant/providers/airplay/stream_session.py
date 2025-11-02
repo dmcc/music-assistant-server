@@ -57,7 +57,7 @@ class AirPlayStreamSession:
         self._lock = asyncio.Lock()
         self.start_ntp: int = 0
         self.start_time: float = 0.0
-        self.chunks_streamed: int = 0  # Total chunks sent to session (each chunk = 1 second)
+        self.seconds_streamed: float = 0  # Total seconds sent to session
         # because we reuse an existing stream session for new play_media requests,
         # we need to track when the last stream was started
         self.last_stream_started: float = 0.0
@@ -187,14 +187,14 @@ class AirPlayStreamSession:
         # Link stream session to player stream
         airplay_player.stream.session = self
 
-        # Snapshot chunks_streamed inside lock to prevent race conditions
+        # Snapshot seconds_streamed inside lock to prevent race conditions
         # Keep lock held during stream.start() to ensure player doesn't miss any chunks
         async with self._lock:
             # (re)start the player specific ffmpeg process
             await self._start_client_ffmpeg(airplay_player)
 
             # Calculate skip_seconds based on how many chunks have been sent
-            skip_seconds = self.chunks_streamed
+            skip_seconds = self.seconds_streamed
             # Start the stream at compensated NTP timestamp
             start_at = self.start_time + skip_seconds
             start_ntp = unix_time_to_ntp(start_at)
@@ -236,19 +236,12 @@ class AirPlayStreamSession:
         """Stream audio to all players."""
         generator_exhausted = False
         _last_metadata: str | None = None
-        chunk_size = self.pcm_format.pcm_sample_size
+        pcm_sample_size = self.pcm_format.pcm_sample_size
         stream_start_time = time.time()
         first_chunk_received = False
         try:
             # each chunk is exactly one second of audio data based on the pcm format.
             async for chunk in self._audio_source:
-                if len(chunk) != chunk_size:
-                    self.prov.logger.warning(
-                        "Audio source yielded chunk of unexpected size %d (expected %d), "
-                        "this may lead to desync issues",
-                        len(chunk),
-                        chunk_size,
-                    )
                 if first_chunk_received is False:
                     first_chunk_received = True
                     self.prov.logger.debug(
@@ -282,18 +275,16 @@ class AirPlayStreamSession:
 
                         if isinstance(result, asyncio.TimeoutError):
                             self.prov.logger.error(
-                                "TIMEOUT writing chunk %d to player %s - REMOVING from sync group!",
-                                self.chunks_streamed,
+                                "TIMEOUT writing chunk to player %s - REMOVING from sync group!",
                                 player.player_id,
                             )
                             players_to_remove.append(player)
                         elif isinstance(result, Exception):
                             self.prov.logger.error(
                                 (
-                                    "Error writing chunk %d to player %s: %s - "
+                                    "Error writing chunk to player %s: %s - "
                                     "REMOVING from sync group!"
                                 ),
-                                self.chunks_streamed,
                                 player.player_id,
                                 result,
                             )
@@ -312,11 +303,13 @@ class AirPlayStreamSession:
                                 self.mass.create_task(player.stream.stop())
 
                     # Update chunk counter (each chunk is exactly one second of audio)
-                    self.chunks_streamed += 1
+                    chunk_seconds = len(chunk) / pcm_sample_size
+                    self.seconds_streamed += chunk_seconds
 
                 # send metadata if changed
                 # do this in a separate task to not disturb audio streaming
                 # NOTE: we should probably move this out of the audio stream task into it's own task
+                metadata: PlayerMedia | None
                 if (
                     self.sync_clients
                     and (_leader := self.sync_clients[0])
@@ -361,12 +354,11 @@ class AirPlayStreamSession:
         """
         Write audio chunk to a specific player.
 
-        each chunk is exactly one second of audio data based on the pcm format.
+        each chunk is (in general) one second of audio data based on the pcm format.
         For late joiners, compensates for chunks sent between join time and actual chunk delivery.
         Blocks (async) until the data has been written.
         """
         write_start = time.time()
-        chunk_number = self.chunks_streamed + 1
         player_id = airplay_player.player_id
 
         # don't write a chunk if we're paused
@@ -387,9 +379,8 @@ class AirPlayStreamSession:
         # Can take up to ~4s if player's latency buffer is being drained
         if total_elapsed > 5.0:
             self.prov.logger.error(
-                "!!! STALLED WRITE: Player %s chunk %d took %.3fs total (stream write: %.3fs)",
+                "!!! STALLED WRITE: Player %s writing chunk took %.3fs total (stream write: %.3fs)",
                 player_id,
-                chunk_number,
                 total_elapsed,
                 stream_write_elapsed,
             )

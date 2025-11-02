@@ -66,7 +66,7 @@ from music_assistant.helpers.audio import (
     get_stream_details,
     resample_pcm_audio,
 )
-from music_assistant.helpers.buffered_generator import buffered_audio, use_audio_buffer
+from music_assistant.helpers.buffered_generator import buffered, use_buffer
 from music_assistant.helpers.ffmpeg import LOGGER as FFMPEG_LOGGER
 from music_assistant.helpers.ffmpeg import check_ffmpeg_version, get_ffmpeg_stream
 from music_assistant.helpers.smart_fades import (
@@ -889,7 +889,7 @@ class StreamsController(CoreController):
             # single item stream (e.g. radio)
             queue_item = self.mass.player_queues.get_item(media.source_id, media.queue_item_id)
             assert queue_item
-            audio_source = buffered_audio(
+            audio_source = buffered(
                 self.get_queue_item_stream(
                     queue_item=queue_item,
                     pcm_format=pcm_format,
@@ -908,7 +908,7 @@ class StreamsController(CoreController):
             )
         return audio_source
 
-    @use_audio_buffer(buffer_size=30, min_buffer_before_yield=2)
+    @use_buffer(buffer_size=30, min_buffer_before_yield=2)
     async def get_queue_flow_stream(
         self,
         queue: PlayerQueue,
@@ -1358,7 +1358,7 @@ class StreamsController(CoreController):
                     assert isinstance(music_prov, MusicProvider)
                 self.mass.create_task(music_prov.on_streamed(streamdetails))
 
-    @use_audio_buffer(buffer_size=30, min_buffer_before_yield=2)
+    @use_buffer(buffer_size=30, min_buffer_before_yield=2)
     async def get_queue_item_stream_with_smartfade(
         self,
         queue_item: QueueItem,
