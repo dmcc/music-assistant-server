@@ -899,7 +899,6 @@ class StreamsController(CoreController):
                     queue_item=queue_item,
                     pcm_format=pcm_format,
                 ),
-                pcm_format=pcm_format,
                 buffer_size=10,
                 min_buffer_before_yield=2,
             )
