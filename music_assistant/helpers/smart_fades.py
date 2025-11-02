@@ -74,12 +74,33 @@ class SmartFadesAnalyzer:
             # Convert PCM bytes to numpy array and then to mono for analysis
             audio_array = np.frombuffer(audio_data, dtype=np.float32)
             if pcm_format.channels > 1:
+                # Ensure array size is divisible by channel count
+                samples_per_channel = len(audio_array) // pcm_format.channels
+                valid_samples = samples_per_channel * pcm_format.channels
+                if valid_samples != len(audio_array):
+                    self.logger.warning(
+                        "Audio buffer size (%d) not divisible by channels (%d), "
+                        "truncating %d samples",
+                        len(audio_array),
+                        pcm_format.channels,
+                        len(audio_array) - valid_samples,
+                    )
+                    audio_array = audio_array[:valid_samples]
+
                 # Reshape to separate channels and take average for mono conversion
                 audio_array = audio_array.reshape(-1, pcm_format.channels)
                 mono_audio = np.asarray(np.mean(audio_array, axis=1, dtype=np.float32))
             else:
                 # Single channel - ensure consistent array type
                 mono_audio = np.asarray(audio_array, dtype=np.float32)
+
+            # Validate that the audio is finite (no NaN or Inf values)
+            if not np.all(np.isfinite(mono_audio)):
+                self.logger.error(
+                    "Audio buffer contains non-finite values (NaN/Inf) for %s, cannot analyze",
+                    stream_details_name,
+                )
+                return None
 
             analysis = await self._analyze_track_beats(mono_audio, fragment, pcm_format.sample_rate)
 

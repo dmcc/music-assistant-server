@@ -997,7 +997,13 @@ class StreamsController(CoreController):
                 if queue_track.streamdetails.duration
                 else crossfade_buffer_duration,
             )
+            # Ensure crossfade buffer size is aligned to frame boundaries
+            # Frame size = bytes_per_sample * channels
+            bytes_per_sample = pcm_format.bit_depth // 8
+            frame_size = bytes_per_sample * pcm_format.channels
             crossfade_buffer_size = int(pcm_format.pcm_sample_size * crossfade_buffer_duration)
+            # Round down to nearest frame boundary
+            crossfade_buffer_size = (crossfade_buffer_size // frame_size) * frame_size
 
             bytes_written = 0
             buffer = b""
@@ -1405,7 +1411,13 @@ class StreamsController(CoreController):
             if streamdetails.duration
             else crossfade_buffer_duration,
         )
+        # Ensure crossfade buffer size is aligned to frame boundaries
+        # Frame size = bytes_per_sample * channels
+        bytes_per_sample = pcm_format.bit_depth // 8
+        frame_size = bytes_per_sample * pcm_format.channels
         crossfade_buffer_size = int(pcm_format.pcm_sample_size * crossfade_buffer_duration)
+        # Round down to nearest frame boundary
+        crossfade_buffer_size = (crossfade_buffer_size // frame_size) * frame_size
         fade_out_data: bytes | None = None
 
         if crossfade_data:
