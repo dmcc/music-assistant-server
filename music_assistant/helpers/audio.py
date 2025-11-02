@@ -672,6 +672,7 @@ async def get_media_stream(
         if isinstance(err, asyncio.CancelledError | GeneratorExit):
             # we were cancelled, just raise
             cancelled = True
+            raise
         logger.error("Error while streaming %s: %s", streamdetails.uri, err)
         # dump the last 10 lines of the log in case of an unclean exit
         logger.warning("\n".join(list(ffmpeg_proc.log_history)[-10:]))
@@ -701,7 +702,7 @@ async def get_media_stream(
             and streamdetails.volume_normalization_mode == VolumeNormalizationMode.DYNAMIC
             and (finished or (seconds_received >= 300))
         ):
-            # if dynamic volume normalization is enabled and the entire track is streamed
+            # if dynamic volume normalization is enabled
             # the loudnorm filter will output the measurement in the log,
             # so we can use that directly instead of analyzing the audio
             logger.log(VERBOSE_LOG_LEVEL, "Collecting loudness measurement...")
@@ -719,20 +720,6 @@ async def get_media_stream(
                         media_type=streamdetails.media_type,
                     )
                 )
-        # schedule loudness analysis if needed
-        if (
-            streamdetails.loudness is None
-            and streamdetails.volume_normalization_mode
-            not in (
-                VolumeNormalizationMode.DISABLED,
-                VolumeNormalizationMode.FIXED_GAIN,
-            )
-            and (finished or (seconds_received >= 300))
-        ):
-            # dynamic mode not allowed and no measurement known, we need to analyze the audio
-            # add background task to start analyzing the audio
-            task_id = f"analyze_loudness_{streamdetails.uri}"
-            mass.call_later(5, analyze_loudness, mass, streamdetails, task_id=task_id)
 
 
 def create_wave_header(
