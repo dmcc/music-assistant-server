@@ -121,7 +121,8 @@ class AudioBuffer:
         """
         Put a chunk of data into the buffer.
 
-        Each chunk represents exactly 1 second of PCM audio.
+        Each chunk represents exactly 1 second of PCM audio
+        (except for the last one, which may be shorter).
         Waits if buffer is full.
 
         Args:
