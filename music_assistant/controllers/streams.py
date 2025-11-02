@@ -74,7 +74,12 @@ from music_assistant.helpers.smart_fades import (
     SmartFadesMixer,
     SmartFadesMode,
 )
-from music_assistant.helpers.util import get_ip_addresses, get_total_system_memory, select_free_port
+from music_assistant.helpers.util import (
+    divide_chunks,
+    get_ip_addresses,
+    get_total_system_memory,
+    select_free_port,
+)
 from music_assistant.helpers.webserver import Webserver
 from music_assistant.models.core_controller import CoreController
 from music_assistant.models.music_provider import MusicProvider
@@ -930,13 +935,9 @@ class StreamsController(CoreController):
         if not start_queue_item:
             # this can happen in some (edge case) race conditions
             return
-        pcm_sample_size = int(
-            pcm_format.sample_rate * (pcm_format.bit_depth / 8) * pcm_format.channels
-        )
+        pcm_sample_size = pcm_format.pcm_sample_size
         if start_queue_item.media_type != MediaType.TRACK:
             # no crossfade on non-tracks
-            # NOTE that we shouldn't be using flow mode for non-tracks at all,
-            # but just to be sure, we specifically disable crossfade here
             smart_fades_mode = SmartFadesMode.DISABLED
             standard_crossfade_duration = 0
         else:
@@ -1002,7 +1003,12 @@ class StreamsController(CoreController):
             buffer = b""
             # handle incoming audio chunks
             first_chunk_received = False
-            buffer_filled = False
+            # buffer size needs to be big enough to include the crossfade part
+            req_buffer_size = (
+                pcm_sample_size
+                if smart_fades_mode == SmartFadesMode.DISABLED
+                else crossfade_buffer_size
+            )
             async for chunk in self.get_queue_item_stream(
                 queue_track,
                 pcm_format=pcm_format,
@@ -1015,25 +1021,15 @@ class StreamsController(CoreController):
                     self.mass.player_queues.track_loaded_in_buffer(
                         queue.queue_id, queue_track.queue_item_id
                     )
-                # buffer size needs to be big enough to include the crossfade part
-                req_buffer_size = (
-                    pcm_sample_size
-                    if smart_fades_mode == SmartFadesMode.DISABLED
-                    else crossfade_buffer_size
-                )
 
                 # ALWAYS APPEND CHUNK TO BUFFER
                 buffer += chunk
                 del chunk
                 if len(buffer) < req_buffer_size:
                     # buffer is not full enough, move on
-                    # yield control to event loop to prevent blocking pipe writes
-                    # use 10ms delay to ensure I/O operations can complete
+                    # yield control to event loop with 10ms delay
                     await asyncio.sleep(0.01)
                     continue
-
-                if not buffer_filled and last_fadeout_part:
-                    buffer_filled = True
 
                 ####  HANDLE CROSSFADE OF PREVIOUS TRACK AND NEW TRACK
                 if last_fadeout_part and last_streamdetails:
@@ -1059,8 +1055,10 @@ class StreamsController(CoreController):
                         last_play_log_entry.seconds_streamed += (
                             crossfade_part_len / 2 / pcm_sample_size
                         )
-                    # yield crossfade_part - buffered_generator will rechunk to 1-second
-                    yield crossfade_part
+                    # yield crossfade_part (in pcm_sample_size chunks)
+                    for _chunk in divide_chunks(crossfade_part, pcm_sample_size):
+                        yield _chunk
+                        del _chunk
                     del crossfade_part
                     # also write the leftover bytes from the crossfade action
                     if remaining_bytes:
