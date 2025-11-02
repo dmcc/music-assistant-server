@@ -494,16 +494,15 @@ class StreamsController(CoreController):
         if queue_item.media_type == MediaType.RADIO:
             # keep very short buffer for radio streams
             # to keep them (more or less) realtime and prevent time outs
-            read_rate_input_args = ["-readrate", "1.01", "-readrate_initial_burst", "3"]
+            read_rate_input_args = ["-readrate", "1.01", "-readrate_initial_burst", "2"]
         elif "Network_Module" in user_agent or "transferMode.dlna.org" in request.headers:
             # and ofcourse we have an exception of the exception. Where most players actually NEED
             # the readrate filter to avoid disconnecting, some other players (DLNA/MusicCast)
             # actually fail when the filter is used. So we disable it completely for those players.
             read_rate_input_args = None  # disable readrate for DLNA players
         else:
-            # when using smart fades, we need to read the audio a bit faster
-            # to account for the crossfade processing time but still limit enough
-            read_rate_input_args = ["-readrate", "1.2", "-readrate_initial_burst", "30"]
+            # allow buffer ahead of 8 seconds and read slightly faster than realtime
+            read_rate_input_args = ["-readrate", "1.05", "-readrate_initial_burst", "8"]
 
         first_chunk_received = False
         async for chunk in get_ffmpeg_stream(
@@ -631,7 +630,8 @@ class StreamsController(CoreController):
             # restarting (or completely failing) the audio stream by keeping the buffer short.
             # this is reported to be an issue especially with Chromecast players.
             # see for example: https://github.com/music-assistant/support/issues/3717
-            extra_input_args=["-readrate", "1.0", "-readrate_initial_burst", "5"],
+            # allow buffer ahead of 8 seconds and read slightly faster than realtime
+            extra_input_args=["-readrate", "1.05", "-readrate_initial_burst", "8"],
             chunk_size=icy_meta_interval if enable_icy else get_chunksize(output_format),
         ):
             try:
@@ -908,7 +908,7 @@ class StreamsController(CoreController):
             )
         return audio_source
 
-    @use_audio_buffer(buffer_size=30, min_buffer_before_yield=4)
+    @use_audio_buffer(buffer_size=30, min_buffer_before_yield=2)
     async def get_queue_flow_stream(
         self,
         queue: PlayerQueue,
@@ -1344,14 +1344,14 @@ class StreamsController(CoreController):
             seconds_streamed = bytes_received / pcm_format.pcm_sample_size
             streamdetails.seconds_streamed = seconds_streamed
             self.logger.debug(
-                "stream %s for %s in %.2f seconds - seconds streamed: %.2f",
+                "stream %s for %s in %.2f seconds - seconds streamed/buffered: %.2f",
                 "aborted" if not finished else "finished",
                 streamdetails.uri,
                 asyncio.get_event_loop().time() - stream_started_at,
                 seconds_streamed,
             )
             # report stream to provider
-            if (finished or seconds_streamed >= 60) and (
+            if (finished or seconds_streamed >= 90) and (
                 music_prov := self.mass.get_provider(streamdetails.provider)
             ):
                 if TYPE_CHECKING:  # avoid circular import
