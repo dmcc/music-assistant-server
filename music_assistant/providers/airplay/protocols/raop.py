@@ -39,16 +39,6 @@ class RaopStream(AirPlayProtocol):
     supports_pairing = True
     _stderr_reader_task: asyncio.Task[None] | None = None
 
-    @property
-    def running(self) -> bool:
-        """Return boolean if this stream is running."""
-        return (
-            not self._stopped
-            and self._started.is_set()
-            and self._cli_proc is not None
-            and not self._cli_proc.closed
-        )
-
     async def start(self, start_ntp: int) -> None:
         """Initialize CLIRaop process for a player."""
         assert self.player.discovery_info is not None  # for type checker
@@ -122,7 +112,6 @@ class RaopStream(AirPlayProtocol):
             self.player.logger.debug(line)
             if "connected to " in line:
                 self.player.logger.info("AirPlay device connected. Starting playback.")
-                self._started.set()
                 break
             if "Cannot connect to AirPlay device" in line:
                 raise PlayerCommandFailed("Cannot connect to AirPlay device")

@@ -61,7 +61,7 @@ class AirPlayStreamSession:
         # because we reuse an existing stream session for new play_media requests,
         # we need to track when the last stream was started
         self.last_stream_started: float = 0.0
-        self._clients_ready_event = asyncio.Event()
+        self._clients_ready = asyncio.Event()
 
     async def start(self) -> None:
         """Initialize stream session for all players."""
@@ -98,13 +98,13 @@ class AirPlayStreamSession:
             # create the named pipes
             await airplay_player.stream.audio_pipe.create()
             await airplay_player.stream.commands_pipe.create()
-            # start the stream
-            await airplay_player.stream.start(self.start_ntp)
             # start the (player-specific) ffmpeg process
             # note that ffmpeg will open the named pipe for writing
             await self._start_client_ffmpeg(airplay_player)
-            # open the command pipe for writing
-            await airplay_player.stream.commands_pipe.open()
+
+            # start the stream
+            await airplay_player.stream.start(self.start_ntp)
+
             # repeat sending the volume level to the player because some players seem
             # to ignore it the first time
             # https://github.com/music-assistant/support/issues/3330
@@ -114,7 +114,7 @@ class AirPlayStreamSession:
             for _airplay_player in self.sync_clients:
                 tm.create_task(_start_client(_airplay_player))
         # All clients started
-        self._clients_ready_event.set()
+        self._clients_ready.set()
 
     async def stop(self) -> None:
         """Stop playback and cleanup."""
@@ -186,13 +186,13 @@ class AirPlayStreamSession:
 
         # Link stream session to player stream
         airplay_player.stream.session = self
+        # create the named pipes
+        await airplay_player.stream.audio_pipe.create()
+        await airplay_player.stream.commands_pipe.create()
 
         # Snapshot seconds_streamed inside lock to prevent race conditions
         # Keep lock held during stream.start() to ensure player doesn't miss any chunks
         async with self._lock:
-            # (re)start the player specific ffmpeg process
-            await self._start_client_ffmpeg(airplay_player)
-
             # Calculate skip_seconds based on how many chunks have been sent
             skip_seconds = self.seconds_streamed
             # Start the stream at compensated NTP timestamp
@@ -207,6 +207,8 @@ class AirPlayStreamSession:
             if airplay_player not in self.sync_clients:
                 self.sync_clients.append(airplay_player)
 
+            # start the player specific ffmpeg process
+            await self._start_client_ffmpeg(airplay_player)
             await airplay_player.stream.start(start_ntp)
 
     async def replace_stream(self, audio_source: AsyncGenerator[bytes, None]) -> None:
@@ -251,7 +253,7 @@ class AirPlayStreamSession:
                         time.time() - self.start_time,
                     )
                     # wait until the clients are ready to receive audio
-                    await asyncio.wait_for(self._clients_ready_event.wait(), timeout=10)
+                    await asyncio.wait_for(self._clients_ready.wait(), timeout=10)
                 async with self._lock:
                     sync_clients = [x for x in self.sync_clients if x.stream and x.stream.running]
                     if not sync_clients:
@@ -370,6 +372,8 @@ class AirPlayStreamSession:
         # and outputs in the correct format for the player stream
         # to the named pipe associated with the player's stream
         if ffmpeg := self._player_ffmpeg.get(player_id):
+            if ffmpeg.closed:
+                raise RuntimeError(f"FFMpeg process for player {player_id} is closed")
             await ffmpeg.write(chunk)
 
         stream_write_start = time.time()
