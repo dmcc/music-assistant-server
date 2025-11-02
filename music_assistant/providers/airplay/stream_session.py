@@ -320,7 +320,7 @@ class AirPlayStreamSession:
                 ):
                     now = time.time()
                     metadata_checksum = f"{metadata.uri}.{metadata.title}.{metadata.image_url}"
-                    progress = metadata.corrected_elapsed_time or 0
+                    progress = int(metadata.corrected_elapsed_time or 0)
                     if _last_metadata != metadata_checksum:
                         _last_metadata = metadata_checksum
                         prev_progress_report = now
