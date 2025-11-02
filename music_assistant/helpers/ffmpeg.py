@@ -103,9 +103,14 @@ class FFMpeg(AsyncProcess):
         timeout: float | None = None,
     ) -> tuple[bytes, bytes]:
         """Override communicate to avoid blocking."""
-        if self._stdin_task and not self._stdin_task.done():
-            self._stdin_task.cancel()
-            with suppress(asyncio.CancelledError):
+        if self._stdin_task:
+            if not self._stdin_task.done():
+                self._stdin_task.cancel()
+            # Always await the task to consume any exception and prevent
+            # "Task exception was never retrieved" errors.
+            # Suppress CancelledError (from cancel) and any other exception
+            # since exceptions have already been propagated through the generator chain.
+            with suppress(asyncio.CancelledError, Exception):
                 await self._stdin_task
         if self._logger_task and not self._logger_task.done():
             self._logger_task.cancel()
@@ -115,9 +120,14 @@ class FFMpeg(AsyncProcess):
         """Close/terminate the process and wait for exit."""
         if self.closed:
             return
-        if self._stdin_task and not self._stdin_task.done():
-            self._stdin_task.cancel()
-            with suppress(asyncio.CancelledError):
+        if self._stdin_task:
+            if not self._stdin_task.done():
+                self._stdin_task.cancel()
+            # Always await the task to consume any exception and prevent
+            # "Task exception was never retrieved" errors.
+            # Suppress CancelledError (from cancel) and any other exception
+            # since exceptions have already been propagated through the generator chain.
+            with suppress(asyncio.CancelledError, Exception):
                 await self._stdin_task
         await super().close(send_signal)
         if self._logger_task and not self._logger_task.done():

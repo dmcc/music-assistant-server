@@ -668,15 +668,15 @@ async def get_media_stream(
         elif ffmpeg_proc.returncode not in (0, None):
             raise AudioError(f"FFMpeg exited with code {ffmpeg_proc.returncode}")
         finished = True
-    except (Exception, GeneratorExit) as err:
+    except (Exception, GeneratorExit, asyncio.CancelledError) as err:
         if isinstance(err, asyncio.CancelledError | GeneratorExit):
             # we were cancelled, just raise
             cancelled = True
-            raise
         logger.error("Error while streaming %s: %s", streamdetails.uri, err)
         # dump the last 10 lines of the log in case of an unclean exit
         logger.warning("\n".join(list(ffmpeg_proc.log_history)[-10:]))
         streamdetails.stream_error = True
+        raise
     finally:
         # always ensure close is called which also handles all cleanup
         await ffmpeg_proc.close()

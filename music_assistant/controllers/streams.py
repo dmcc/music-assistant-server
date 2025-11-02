@@ -449,7 +449,8 @@ class StreamsController(CoreController):
         ):
             # crossfade is not supported on this player due to missing gapless playback
             self.logger.warning(
-                "Crossfade disabled: Player %s does not support gapless playback",
+                "Crossfade disabled: Player %s does not support gapless playback, "
+                "consider enabling flow mode to enable crossfade on this player.",
                 queue_player.display_name if queue_player else "Unknown Player",
             )
             smart_fades_mode = SmartFadesMode.DISABLED
@@ -493,7 +494,7 @@ class StreamsController(CoreController):
         if queue_item.media_type == MediaType.RADIO:
             # keep very short buffer for radio streams
             # to keep them (more or less) realtime and prevent time outs
-            read_rate_input_args = ["-readrate", "1.00", "-readrate_initial_burst", "1"]
+            read_rate_input_args = ["-readrate", "1.01", "-readrate_initial_burst", "3"]
         elif "Network_Module" in user_agent or "transferMode.dlna.org" in request.headers:
             # and ofcourse we have an exception of the exception. Where most players actually NEED
             # the readrate filter to avoid disconnecting, some other players (DLNA/MusicCast)
