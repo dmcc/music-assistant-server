@@ -319,6 +319,9 @@ class AudioBuffer:
             exc = t.exception()
             if exc is not None and isinstance(exc, Exception):
                 self._producer_error = exc
+                # Mark buffer as cancelled when producer fails
+                # This prevents reuse of a buffer in error state
+                self._cancelled = True
                 # Wake up any waiting consumers so they can see the error
                 loop = asyncio.get_running_loop()
                 loop.call_soon_threadsafe(self._data_available.notify_all)
