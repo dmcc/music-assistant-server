@@ -902,10 +902,6 @@ class Player(ABC):
         This is a convenience property with the calculates current media
         based on any group memberships or source plugins that can be active.
         """
-        # if the player is grouped/synced, use the current_media of the group/parent player
-        if parent_player_id := (self.active_group or self.synced_to):
-            if parent_player := self.mass.players.get(parent_player_id):
-                return parent_player.current_media
         return self.__attr_current_media
 
     @cached_property
@@ -1282,6 +1278,10 @@ class Player(ABC):
 
     def __calculate_current_media(self) -> PlayerMedia | None:
         """Calculate the current media for the player."""
+        # if the player is grouped/synced, use the current_media of the group/parent player
+        if parent_player_id := (self.active_group or self.synced_to):
+            if parent_player := self.mass.players.get(parent_player_id):
+                return parent_player.current_media
         # if a pluginsource is currently active, return those details
         if (
             self.active_source
