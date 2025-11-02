@@ -528,7 +528,7 @@ class AppleMusicProvider(MusicProvider):
         return StreamDetails(
             item_id=item_id,
             provider=self.lookup_key,
-            audio_format=AudioFormat(ccontent_type=ContentType.MP4, codec_type=ContentType.AAC),
+            audio_format=AudioFormat(content_type=ContentType.MP4, codec_type=ContentType.AAC),
             stream_type=StreamType.ENCRYPTED_HTTP,
             decryption_key=await self._get_decryption_key(license_url, key_id, uri, item_id),
             path=stream_url,
