@@ -1576,16 +1576,22 @@ class StreamsController(CoreController):
 
     def _log_request(self, request: web.Request) -> None:
         """Log request."""
-        if not self.logger.isEnabledFor(VERBOSE_LOG_LEVEL):
-            return
-        self.logger.log(
-            VERBOSE_LOG_LEVEL,
-            "Got %s request to %s from %s\nheaders: %s\n",
-            request.method,
-            request.path,
-            request.remote,
-            request.headers,
-        )
+        if self.logger.isEnabledFor(VERBOSE_LOG_LEVEL):
+            self.logger.log(
+                VERBOSE_LOG_LEVEL,
+                "Got %s request to %s from %s\nheaders: %s\n",
+                request.method,
+                request.path,
+                request.remote,
+                request.headers,
+            )
+        else:
+            self.logger.debug(
+                "Got %s request to %s from %s",
+                request.method,
+                request.path,
+                request.remote,
+            )
 
     async def get_output_format(
         self,
