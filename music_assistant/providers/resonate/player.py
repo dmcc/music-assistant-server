@@ -232,7 +232,7 @@ class ResonatePlayer(Player):
                 input_format=flow_pcm_format,
                 output_format=pcm_format,
                 filter_params=get_player_filter_params(
-                    self.mass, self.player_id, pcm_format, pcm_format
+                    self.mass, self.player_id, flow_pcm_format, pcm_format
                 ),
             )
 

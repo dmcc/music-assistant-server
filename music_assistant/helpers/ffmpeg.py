@@ -202,7 +202,6 @@ async def get_ffmpeg_stream(
     chunk_size: int | None = None,
     extra_input_args: list[str] | None = None,
     extra_output_args: list[str] | None = None,
-    raise_ffmpeg_exception: bool = False,
 ) -> AsyncGenerator[bytes, None]:
     """
     Get the ffmpeg audio stream as async generator.
@@ -225,12 +224,9 @@ async def get_ffmpeg_stream(
         async for chunk in iterator:
             yield chunk
         if ffmpeg_proc.returncode not in (None, 0):
+            # unclean exit of ffmpeg - raise error with log tail
             log_tail = "\n" + "\n".join(list(ffmpeg_proc.log_history)[-5:])
-            if not raise_ffmpeg_exception:
-                # dump the last 5 lines of the log in case of an unclean exit
-                ffmpeg_proc.logger.error(log_tail)
-            else:
-                raise AudioError(log_tail)
+            raise AudioError(log_tail)
 
 
 def get_ffmpeg_args(  # noqa: PLR0915

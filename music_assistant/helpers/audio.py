@@ -1097,7 +1097,6 @@ async def get_multi_file_stream(
     mass: MusicAssistant,  # noqa: ARG001
     streamdetails: StreamDetails,
     seek_position: int = 0,
-    raise_ffmpeg_exception: bool = False,
 ) -> AsyncGenerator[bytes, None]:
     """Return audio stream for a concatenation of multiple files.
 
@@ -1135,7 +1134,6 @@ async def get_multi_file_stream(
                 "-ss",
                 str(seek_position),
             ],
-            raise_ffmpeg_exception=raise_ffmpeg_exception,
         ):
             yield chunk
     finally:
