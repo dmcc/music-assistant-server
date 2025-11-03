@@ -276,17 +276,17 @@ def get_ffmpeg_args(  # noqa: PLR0915
                 "1",
                 # Set the maximum delay in seconds after which to give up reconnecting.
                 "-reconnect_delay_max",
-                "30",
+                "10",
                 # If set then even streamed/non seekable streams will be reconnected on errors.
                 "-reconnect_streamed",
                 "1",
                 # Reconnect automatically in case of TCP/TLS errors during connect.
                 "-reconnect_on_network_error",
-                "1",
+                "0",
                 # A comma separated list of HTTP status codes to reconnect on.
                 # The list can include specific status codes (e.g. 503) or the strings 4xx / 5xx.
                 "-reconnect_on_http_error",
-                "5xx,4xx",
+                "5xx,429",
             ]
         if input_format.content_type.is_pcm():
             input_args += [
