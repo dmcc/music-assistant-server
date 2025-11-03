@@ -136,10 +136,11 @@ class AirPlayStreamSession:
         assert airplay_player.stream.session == self
         async with self._lock:
             self.sync_clients.remove(airplay_player)
-        await airplay_player.stream.stop()
         if ffmpeg := self._player_ffmpeg.pop(airplay_player.player_id, None):
+            await ffmpeg.write_eof()
             await ffmpeg.close()
             del ffmpeg
+        await airplay_player.stream.stop()
         airplay_player.stream = None
         # If this was the last client, stop the session
         if not self.sync_clients:
@@ -372,6 +373,8 @@ class AirPlayStreamSession:
         if ffmpeg := self._player_ffmpeg.pop(airplay_player.player_id, None):
             await ffmpeg.write_eof()
             await ffmpeg.close()
+        if airplay_player.stream:
+            await airplay_player.stream.stop()
 
     async def _send_metadata(self, progress: int | None, metadata: PlayerMedia | None) -> None:
         """Send metadata to all players."""

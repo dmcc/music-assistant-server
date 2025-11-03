@@ -170,6 +170,7 @@ class AsyncProcess:
             try:
                 if self.proc.stdin.can_write_eof():
                     self.proc.stdin.write_eof()
+                await self.proc.stdin.drain()
             except (
                 AttributeError,
                 AssertionError,
