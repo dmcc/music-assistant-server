@@ -1435,11 +1435,18 @@ class StreamsController(CoreController):
         fade_out_data: bytes | None = None
 
         if crossfade_data:
-            discard_seconds = (
-                int(crossfade_data.fade_in_size / crossfade_data.pcm_format.pcm_sample_size) - 1
+            # Calculate discard amount in seconds (format-independent)
+            fade_in_duration_seconds = (
+                crossfade_data.fade_in_size / crossfade_data.pcm_format.pcm_sample_size
             )
+            discard_seconds = int(fade_in_duration_seconds) - 1
+            # Calculate discard amounts in CURRENT track's format
             discard_bytes = int(discard_seconds * pcm_format.pcm_sample_size)
-            discard_leftover = int(crossfade_data.fade_in_size - discard_bytes)
+            # Convert fade_in_size to current track's format for correct leftover calculation
+            fade_in_size_in_current_format = int(
+                fade_in_duration_seconds * pcm_format.pcm_sample_size
+            )
+            discard_leftover = fade_in_size_in_current_format - discard_bytes
         else:
             discard_seconds = streamdetails.seek_position
             discard_leftover = 0
