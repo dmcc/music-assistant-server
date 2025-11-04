@@ -116,6 +116,10 @@ class RaopStream(AirPlayProtocol):
 
         # start reading the stderr of the cliraop process from another task
         self._cli_proc.attach_stderr_reader(self.mass.create_task(self._stderr_reader()))
+        # repeat sending the volume level to the player because some players seem
+        # to ignore it the first time
+        # https://github.com/music-assistant/support/issues/3330
+        self.mass.call_later(1, self.send_cli_command(f"VOLUME={self.player.volume_level}\n"))
 
     async def start_pairing(self) -> None:
         """Start pairing process for this protocol (if supported)."""
