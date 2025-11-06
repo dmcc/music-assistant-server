@@ -947,6 +947,7 @@ class StreamsController(CoreController):
             else "",
         )
         total_bytes_sent = 0
+        total_chunks_received = 0
 
         while True:
             # get (next) queue item to stream
@@ -1001,23 +1002,30 @@ class StreamsController(CoreController):
             # handle incoming audio chunks
             first_chunk_received = False
             # buffer size needs to be big enough to include the crossfade part
-            req_buffer_size = (
-                pcm_sample_size
-                if smart_fades_mode == SmartFadesMode.DISABLED
-                else crossfade_buffer_size
-            )
+
             async for chunk in self.get_queue_item_stream(
                 queue_track,
                 pcm_format=pcm_format,
                 seek_position=queue_track.streamdetails.seek_position,
                 raise_on_error=False,
             ):
+                total_chunks_received += 1
                 if not first_chunk_received:
                     first_chunk_received = True
                     # inform the queue that the track is now loaded in the buffer
                     # so the next track can be preloaded
                     self.mass.player_queues.track_loaded_in_buffer(
                         queue.queue_id, queue_track.queue_item_id
+                    )
+                if total_chunks_received < 10 and smart_fades_mode != SmartFadesMode.DISABLED:
+                    # we want a stream to start as quickly as possible
+                    # so for the first 10 chunks we keep a very short buffer
+                    req_buffer_size = pcm_format.pcm_sample_size
+                else:
+                    req_buffer_size = (
+                        pcm_sample_size
+                        if smart_fades_mode == SmartFadesMode.DISABLED
+                        else crossfade_buffer_size
                     )
 
                 # ALWAYS APPEND CHUNK TO BUFFER
@@ -1447,18 +1455,28 @@ class StreamsController(CoreController):
         else:
             discard_seconds = streamdetails.seek_position
             discard_leftover = 0
-
+        total_chunks_received = 0
+        req_buffer_size = crossfade_buffer_size
         async for chunk in self.get_queue_item_stream(
             queue_item, pcm_format, seek_position=discard_seconds
         ):
+            total_chunks_received += 1
             if discard_leftover:
                 # discard leftover bytes from crossfade data
                 chunk = chunk[discard_leftover:]  # noqa: PLW2901
                 discard_leftover = 0
+
+            if total_chunks_received < 10:
+                # we want a stream to start as quickly as possible
+                # so for the first 10 chunks we keep a very short buffer
+                req_buffer_size = pcm_format.pcm_sample_size
+            else:
+                req_buffer_size = crossfade_buffer_size
+
             # ALWAYS APPEND CHUNK TO BUFFER
             buffer += chunk
             del chunk
-            if len(buffer) < crossfade_buffer_size:
+            if len(buffer) < req_buffer_size:
                 # buffer is not full enough, move on
                 continue
 
@@ -1482,7 +1500,7 @@ class StreamsController(CoreController):
                 crossfade_data = None
 
             #### OTHER: enough data in buffer, feed to output
-            while len(buffer) > crossfade_buffer_size:
+            while len(buffer) > req_buffer_size:
                 yield buffer[: pcm_format.pcm_sample_size]
                 bytes_written += pcm_format.pcm_sample_size
                 buffer = buffer[pcm_format.pcm_sample_size :]
