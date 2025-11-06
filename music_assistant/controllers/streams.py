@@ -505,7 +505,7 @@ class StreamsController(CoreController):
             read_rate_input_args = None  # disable readrate for DLNA players
         else:
             # allow buffer ahead of 8 seconds and read slightly faster than realtime
-            read_rate_input_args = ["-readrate", "1.05", "-readrate_initial_burst", "8"]
+            read_rate_input_args = ["-readrate", "1.2", "-readrate_initial_burst", "10"]
 
         first_chunk_received = False
         async for chunk in get_ffmpeg_stream(
