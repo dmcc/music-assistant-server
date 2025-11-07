@@ -2135,6 +2135,8 @@ class PlayerController(CoreController):
                         str(err),
                         exc_info=err if self.logger.isEnabledFor(10) else None,
                     )
+                # Yield to event loop to prevent blocking
+                await asyncio.sleep(0)
             await asyncio.sleep(1)
 
     async def _handle_select_plugin_source(
