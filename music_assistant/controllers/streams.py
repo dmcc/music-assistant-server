@@ -497,19 +497,18 @@ class StreamsController(CoreController):
         if queue_item.media_type == MediaType.RADIO:
             # keep very short buffer for radio streams
             # to keep them (more or less) realtime and prevent time outs
-            read_rate_input_args = ["-readrate", "1.01", "-readrate_initial_burst", "2"]
+            read_rate_input_args = ["-readrate", "1.0", "-readrate_initial_burst", "2"]
         elif "Network_Module" in user_agent or "transferMode.dlna.org" in request.headers:
             # and ofcourse we have an exception of the exception. Where most players actually NEED
             # the readrate filter to avoid disconnecting, some other players (DLNA/MusicCast)
             # actually fail when the filter is used. So we disable it completely for those players.
             read_rate_input_args = None  # disable readrate for DLNA players
         else:
-            # allow buffer ahead of 8 seconds and read slightly faster than realtime
-            read_rate_input_args = ["-readrate", "1.2", "-readrate_initial_burst", "10"]
+            # allow buffer ahead of 10 seconds and read 1.5x faster than realtime
+            read_rate_input_args = ["-readrate", "1.5", "-readrate_initial_burst", "10"]
 
         first_chunk_received = False
         bytes_sent = 0
-        premature_disconnect = False
         async for chunk in get_ffmpeg_stream(
             audio_input=audio_input,
             input_format=pcm_format,
@@ -533,29 +532,22 @@ class StreamsController(CoreController):
                         queue_item.queue_id, queue_item.queue_item_id
                     )
             except (BrokenPipeError, ConnectionResetError, ConnectionError) as err:
-                premature_disconnect = True
-                self.logger.warning(
-                    "Player %s disconnected prematurely from stream for %s (%s) - "
-                    "sent %d bytes, error: %s",
-                    queue.display_name,
-                    queue_item.name,
-                    queue_item.uri,
-                    bytes_sent,
-                    err.__class__.__name__,
-                )
+                if first_chunk_received and not queue_player.stop_called:
+                    # Player disconnected (unexpected) after receiving at least some data
+                    # This could indicate buffering issues, network problems,
+                    # or player-specific issues
+                    bytes_expected = get_chunksize(output_format, queue_item.duration or 3600)
+                    self.logger.warning(
+                        "Player %s disconnected prematurely from stream for %s (%s) - "
+                        "error: %s, sent %d bytes, expected (approx) bytes=%d",
+                        queue.display_name,
+                        queue_item.name,
+                        queue_item.uri,
+                        err.__class__.__name__,
+                        bytes_sent,
+                        bytes_expected,
+                    )
                 break
-        if premature_disconnect and first_chunk_received:
-            # Player disconnected after receiving at least some data
-            # This could indicate buffering issues, network problems, or player-specific issues
-            seconds_sent = bytes_sent / output_format.pcm_sample_size if output_format else 0
-            self.logger.info(
-                "Stream statistics for %s: bytes sent=%d, approx seconds=%.1f, "
-                "expected duration=%.1f",
-                queue_item.name,
-                bytes_sent,
-                seconds_sent,
-                queue_item.duration or 0,
-            )
         if queue_item.streamdetails.stream_error:
             self.logger.error(
                 "Error streaming QueueItem %s (%s) to %s - will try to skip to next item",
