@@ -508,6 +508,8 @@ class StreamsController(CoreController):
             read_rate_input_args = ["-readrate", "1.2", "-readrate_initial_burst", "10"]
 
         first_chunk_received = False
+        bytes_sent = 0
+        premature_disconnect = False
         async for chunk in get_ffmpeg_stream(
             audio_input=audio_input,
             input_format=pcm_format,
@@ -522,6 +524,7 @@ class StreamsController(CoreController):
         ):
             try:
                 await resp.write(chunk)
+                bytes_sent += len(chunk)
                 if not first_chunk_received:
                     first_chunk_received = True
                     # inform the queue that the track is now loaded in the buffer
@@ -529,8 +532,30 @@ class StreamsController(CoreController):
                     self.mass.player_queues.track_loaded_in_buffer(
                         queue_item.queue_id, queue_item.queue_item_id
                     )
-            except (BrokenPipeError, ConnectionResetError, ConnectionError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionError) as err:
+                premature_disconnect = True
+                self.logger.warning(
+                    "Player %s disconnected prematurely from stream for %s (%s) - "
+                    "sent %d bytes, error: %s",
+                    queue.display_name,
+                    queue_item.name,
+                    queue_item.uri,
+                    bytes_sent,
+                    err.__class__.__name__,
+                )
                 break
+        if premature_disconnect and first_chunk_received:
+            # Player disconnected after receiving at least some data
+            # This could indicate buffering issues, network problems, or player-specific issues
+            seconds_sent = bytes_sent / output_format.pcm_sample_size if output_format else 0
+            self.logger.info(
+                "Stream statistics for %s: bytes sent=%d, approx seconds=%.1f, "
+                "expected duration=%.1f",
+                queue_item.name,
+                bytes_sent,
+                seconds_sent,
+                queue_item.duration or 0,
+            )
         if queue_item.streamdetails.stream_error:
             self.logger.error(
                 "Error streaming QueueItem %s (%s) to %s - will try to skip to next item",
@@ -629,7 +654,7 @@ class StreamsController(CoreController):
             # this is reported to be an issue especially with Chromecast players.
             # see for example: https://github.com/music-assistant/support/issues/3717
             # allow buffer ahead of 8 seconds and read slightly faster than realtime
-            extra_input_args=["-readrate", "1.05", "-readrate_initial_burst", "8"],
+            extra_input_args=["-readrate", "1.01", "-readrate_initial_burst", "8"],
             chunk_size=icy_meta_interval if enable_icy else get_chunksize(output_format),
         ):
             try:
@@ -1215,12 +1240,7 @@ class StreamsController(CoreController):
                 extra_input_args=["-y", "-re"],
             ):
                 if plugin_source.in_use_by != player_id:
-                    self.logger.debug(
-                        "Aborting streaming PluginSource %s to %s "
-                        "- another player took over control",
-                        plugin_source_id,
-                        player_id,
-                    )
+                    # another player took over or the stream ended, stop streaming
                     break
                 yield chunk
         finally:
