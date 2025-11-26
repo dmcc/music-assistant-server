@@ -206,7 +206,9 @@ def generate_release_notes(  # noqa: PLR0915
     if important_notes and important_notes.strip():
         lines.append("## ⚠️ Important Notes")
         lines.append("")
-        lines.append(important_notes.strip())
+        # Convert literal \n to actual newlines and preserve existing newlines
+        formatted_notes = important_notes.strip().replace("\\n", "\n")
+        lines.append(formatted_notes)
         lines.append("")
         lines.append("---")
         lines.append("")
