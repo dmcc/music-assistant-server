@@ -15,6 +15,10 @@ on:
           - stable
           - beta
           - nightly
+      important_notes:
+        description: "Important notes (breaking changes, critical info, etc.)"
+        required: false
+        type: string
   workflow_call:
     inputs:
       version:
@@ -24,6 +28,10 @@ on:
       channel:
         description: "Release channel"
         required: true
+        type: string
+      important_notes:
+        description: "Important notes (breaking changes, critical info, etc.)"
+        required: false
         type: string
     secrets:
       PYPI_TOKEN:
@@ -224,6 +232,7 @@ jobs:
           branch: ${{ needs.validate-and-build.outputs.branch }}
           channel: ${{ inputs.channel }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          important-notes: ${{ inputs.important_notes }}
 
       - name: Format release title
         id: format_title
