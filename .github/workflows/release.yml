@@ -18,7 +18,6 @@ on:
       important_notes:
         description: "Important notes (breaking changes, critical info, etc.)"
         required: false
-        type: string
   workflow_call:
     inputs:
       version:
