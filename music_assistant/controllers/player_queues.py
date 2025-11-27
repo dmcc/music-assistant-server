@@ -2046,6 +2046,25 @@ class PlayerQueuesController(CoreController):
             if queue.next_item and queue.next_item.streamdetails:
                 queue.next_item.streamdetails.dsp = dsp
 
+        # handle updating stream_metadata if needed
+        if (
+            queue.current_item
+            and (streamdetails := queue.current_item.streamdetails)
+            and streamdetails.stream_metadata_update_callback
+            and (
+                streamdetails.stream_metadata_last_updated is None
+                or (
+                    time.time() - streamdetails.stream_metadata_last_updated
+                    >= streamdetails.stream_metadata_update_interval
+                )
+            )
+        ):
+            self.mass.create_task(
+                streamdetails.stream_metadata_update_callback(
+                    streamdetails, int(queue.corrected_elapsed_time)
+                )
+            )
+
         # handle sending a playback progress report
         # we do this every 30 seconds or when the state changes
         if (
