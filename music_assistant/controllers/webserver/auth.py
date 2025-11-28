@@ -1217,7 +1217,7 @@ class AuthenticationManager:
         else:
             self.logger.info("Password changed for user %s", target_user.username)
 
-    async def _update_user_filters(
+    async def update_user_filters(
         self,
         target_user: User,
         player_filter: list[str] | None,
@@ -1326,7 +1326,7 @@ class AuthenticationManager:
         if player_filter is not None or provider_filter is not None:
             if not is_admin_update:
                 raise InsufficientPermissions("Only admins can update player/provider filters")
-            target_user = await self._update_user_filters(
+            target_user = await self.update_user_filters(
                 target_user, player_filter, provider_filter
             )
 
