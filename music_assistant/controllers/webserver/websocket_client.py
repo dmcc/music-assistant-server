@@ -15,7 +15,7 @@ from music_assistant_models.api import (
     MessageType,
     SuccessResultMessage,
 )
-from music_assistant_models.auth import AuthProviderType, UserRole
+from music_assistant_models.auth import AuthProviderType, User, UserRole
 from music_assistant_models.enums import EventType
 from music_assistant_models.errors import (
     AuthenticationRequired,
@@ -27,12 +27,7 @@ from music_assistant_models.errors import (
 from music_assistant.constants import HOMEASSISTANT_SYSTEM_USER, VERBOSE_LOG_LEVEL
 from music_assistant.helpers.api import APICommandHandler, parse_arguments
 
-from .helpers.auth_middleware import (
-    get_current_user,
-    is_request_from_ingress,
-    set_current_token,
-    set_current_user,
-)
+from .helpers.auth_middleware import is_request_from_ingress, set_current_token, set_current_user
 
 if TYPE_CHECKING:
     from music_assistant_models.event import MassEvent
@@ -56,7 +51,9 @@ class WebsocketClientHandler:
         self._handle_task: asyncio.Task[Any] | None = None
         self._writer_task: asyncio.Task[None] | None = None
         self._logger = webserver.logger
-        self._authenticated_user: Any = None  # Will be set after auth command or from Ingress
+        self._authenticated_user: User | None = (
+            None  # Will be set after auth command or from Ingress
+        )
         self._current_token: str | None = None  # Will be set after auth command
         self._token_id: str | None = None  # Will be set after auth for tracking revocation
         self._is_ingress = is_request_from_ingress(request)
@@ -398,11 +395,10 @@ class WebsocketClientHandler:
             return
 
         def handle_event(event: MassEvent) -> None:
-            current_user = get_current_user()
             # filter events for objects the user has no access to
             if (
-                current_user
-                and current_user.player_filter
+                self._authenticated_user
+                and self._authenticated_user.player_filter
                 and event.event
                 in (
                     EventType.PLAYER_ADDED,
@@ -414,7 +410,7 @@ class WebsocketClientHandler:
                     EventType.QUEUE_UPDATED,
                 )
                 and event.object_id
-                and event.object_id not in current_user.player_filter
+                and event.object_id not in self._authenticated_user.player_filter
             ):
                 return
 
