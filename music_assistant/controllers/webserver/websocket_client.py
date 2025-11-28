@@ -16,6 +16,7 @@ from music_assistant_models.api import (
     SuccessResultMessage,
 )
 from music_assistant_models.auth import AuthProviderType, UserRole
+from music_assistant_models.enums import EventType
 from music_assistant_models.errors import (
     AuthenticationRequired,
     InsufficientPermissions,
@@ -26,9 +27,16 @@ from music_assistant_models.errors import (
 from music_assistant.constants import HOMEASSISTANT_SYSTEM_USER, VERBOSE_LOG_LEVEL
 from music_assistant.helpers.api import APICommandHandler, parse_arguments
 
-from .helpers.auth_middleware import is_request_from_ingress, set_current_token, set_current_user
+from .helpers.auth_middleware import (
+    get_current_user,
+    is_request_from_ingress,
+    set_current_token,
+    set_current_user,
+)
 
 if TYPE_CHECKING:
+    from music_assistant_models.event import MassEvent
+
     from music_assistant.controllers.webserver import WebserverController
 
 MAX_PENDING_MSG = 512
@@ -389,8 +397,27 @@ class WebsocketClientHandler:
             # Already subscribed
             return
 
-        def handle_event(event: Any) -> None:
-            # event is MassEvent but we use Any to avoid runtime import
+        def handle_event(event: MassEvent) -> None:
+            current_user = get_current_user()
+            # filter events for objects the user has no access to
+            if (
+                current_user
+                and current_user.player_filter
+                and event.event
+                in (
+                    EventType.PLAYER_ADDED,
+                    EventType.PLAYER_REMOVED,
+                    EventType.PLAYER_UPDATED,
+                    EventType.QUEUE_ADDED,
+                    EventType.QUEUE_ITEMS_UPDATED,
+                    EventType.QUEUE_TIME_UPDATED,
+                    EventType.QUEUE_UPDATED,
+                )
+                and event.object_id
+                and event.object_id not in current_user.player_filter
+            ):
+                return
+
             self._send_message_sync(event)
 
         self._events_unsub_callback = self.mass.subscribe(handle_event)
