@@ -12,10 +12,13 @@ import hashlib
 import html
 import json
 import os
+import ssl
+import tempfile
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from concurrent import futures
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 from urllib.parse import quote
 
@@ -63,6 +66,9 @@ if TYPE_CHECKING:
 DEFAULT_SERVER_PORT = 8095
 INGRESS_SERVER_PORT = 8094
 CONF_BASE_URL = "base_url"
+CONF_ENABLE_SSL = "enable_ssl"
+CONF_SSL_CERTIFICATE = "ssl_certificate"
+CONF_SSL_PRIVATE_KEY = "ssl_private_key"
 MAX_PENDING_MSG = 512
 CANCELLATION_ERRORS: Final = (asyncio.CancelledError, futures.CancelledError)
 
@@ -100,67 +106,111 @@ class WebserverController(CoreController):
         """Return all Config Entries for this core module (if any)."""
         ip_addresses = await get_ip_addresses()
         default_publish_ip = ip_addresses[0]
-        default_base_url = f"http://{default_publish_ip}:{DEFAULT_SERVER_PORT}"
-        return (
-            ConfigEntry(
-                key="webserver_warn",
-                type=ConfigEntryType.ALERT,
-                label="Please note that the webserver is unencrypted. "
-                "Never ever expose the webserver directly to the internet! \n\n"
-                "Use a reverse proxy or VPN to secure access.",
-                required=False,
-            ),
-            ConfigEntry(
-                key=CONF_BASE_URL,
-                type=ConfigEntryType.STRING,
-                default_value=default_base_url,
-                label="Base URL",
-                description="The (base) URL to reach this webserver in the network. \n"
-                "Override this in advanced scenarios where for example you're running "
-                "the webserver behind a reverse proxy.",
-            ),
-            ConfigEntry(
-                key=CONF_BIND_PORT,
-                type=ConfigEntryType.INTEGER,
-                default_value=DEFAULT_SERVER_PORT,
-                label="TCP Port",
-                description="The TCP port to run the webserver.",
-            ),
-            ConfigEntry(
-                key=CONF_BIND_IP,
-                type=ConfigEntryType.STRING,
-                default_value="0.0.0.0",
-                options=[ConfigValueOption(x, x) for x in {"0.0.0.0", *ip_addresses}],
-                label="Bind to IP/interface",
-                description="Bind the (web)server to this specific interface. \n"
-                "Use 0.0.0.0 to bind to all interfaces. \n"
-                "Set this address for example to a docker-internal network, "
-                "when you are running a reverse proxy to enhance security and "
-                "protect outside access to the webinterface and API. \n\n"
-                "This is an advanced setting that should normally "
-                "not be adjusted in regular setups.",
-                category="advanced",
-            ),
-            ConfigEntry(
-                key=CONF_AUTH_ALLOW_SELF_REGISTRATION,
-                type=ConfigEntryType.BOOLEAN,
-                default_value=True,
-                label="Allow Self-Registration",
-                description="Allow users to create accounts via Home Assistant OAuth. \n"
-                "New users will have USER role by default.",
-                category="advanced",
-                hidden=not any(provider.domain == "hass" for provider in self.mass.providers),
-            ),
-            ConfigEntry(
-                key="remote_id",
-                type=ConfigEntryType.STRING,
-                label="Remote ID",
-                description="Unique identifier for WebRTC remote access. "
-                "Generated automatically and should not be changed.",
-                required=False,
-                hidden=True,
-            ),
+
+        # Determine if SSL is enabled from values
+        ssl_enabled = values.get(CONF_ENABLE_SSL, False) if values else False
+        protocol = "https" if ssl_enabled else "http"
+        default_base_url = f"{protocol}://{default_publish_ip}:{DEFAULT_SERVER_PORT}"
+
+        # Show warning only if SSL is not enabled
+        entries = []
+        if not ssl_enabled:
+            entries.append(
+                ConfigEntry(
+                    key="webserver_warn",
+                    type=ConfigEntryType.ALERT,
+                    label="Please note that the webserver is unencrypted. "
+                    "Never ever expose the webserver directly to the internet! \n\n"
+                    "Use a reverse proxy or VPN to secure access, or enable SSL below.",
+                    required=False,
+                )
+            )
+
+        entries.extend(
+            [
+                ConfigEntry(
+                    key=CONF_BASE_URL,
+                    type=ConfigEntryType.STRING,
+                    default_value=default_base_url,
+                    label="Base URL",
+                    description="The (base) URL to reach this webserver in the network. \n"
+                    "Override this in advanced scenarios where for example you're running "
+                    "the webserver behind a reverse proxy.",
+                ),
+                ConfigEntry(
+                    key=CONF_BIND_PORT,
+                    type=ConfigEntryType.INTEGER,
+                    default_value=DEFAULT_SERVER_PORT,
+                    label="TCP Port",
+                    description="The TCP port to run the webserver.",
+                ),
+                ConfigEntry(
+                    key=CONF_BIND_IP,
+                    type=ConfigEntryType.STRING,
+                    default_value="0.0.0.0",
+                    options=[ConfigValueOption(x, x) for x in {"0.0.0.0", *ip_addresses}],
+                    label="Bind to IP/interface",
+                    description="Bind the (web)server to this specific interface. \n"
+                    "Use 0.0.0.0 to bind to all interfaces. \n"
+                    "Set this address for example to a docker-internal network, "
+                    "when you are running a reverse proxy to enhance security and "
+                    "protect outside access to the webinterface and API. \n\n"
+                    "This is an advanced setting that should normally "
+                    "not be adjusted in regular setups.",
+                    category="advanced",
+                ),
+                ConfigEntry(
+                    key=CONF_ENABLE_SSL,
+                    type=ConfigEntryType.BOOLEAN,
+                    default_value=False,
+                    label="Enable SSL/TLS",
+                    description="Enable HTTPS by providing an SSL certificate and private key. \n"
+                    "This encrypts all communication with the webserver.",
+                    category="advanced",
+                ),
+                ConfigEntry(
+                    key=CONF_SSL_CERTIFICATE,
+                    type=ConfigEntryType.STRING,
+                    label="SSL Certificate",
+                    description="Paste the contents of your SSL certificate file (PEM format). \n"
+                    "This should include the full certificate chain if applicable.",
+                    category="advanced",
+                    required=False,
+                    hidden=not ssl_enabled,
+                ),
+                ConfigEntry(
+                    key=CONF_SSL_PRIVATE_KEY,
+                    type=ConfigEntryType.SECURE_STRING,
+                    label="SSL Private Key",
+                    description="Paste the contents of your SSL private key file (PEM format). \n"
+                    "This is securely encrypted and stored.",
+                    category="advanced",
+                    required=False,
+                    hidden=not ssl_enabled,
+                ),
+                ConfigEntry(
+                    key=CONF_AUTH_ALLOW_SELF_REGISTRATION,
+                    type=ConfigEntryType.BOOLEAN,
+                    default_value=True,
+                    label="Allow Self-Registration",
+                    description="Allow users to create accounts via Home Assistant OAuth. \n"
+                    "New users will have USER role by default.",
+                    category="advanced",
+                    hidden=not any(provider.domain == "hass" for provider in self.mass.providers),
+                ),
+                ConfigEntry(
+                    key="remote_id",
+                    type=ConfigEntryType.STRING,
+                    label="Remote ID",
+                    description="Unique identifier for WebRTC remote access. "
+                    "Generated automatically and should not be changed.",
+                    required=False,
+                    hidden=True,
+                ),
+            ]
         )
+
+        return tuple(entries)
 
     async def setup(self, config: CoreConfig) -> None:  # noqa: PLR0915
         """Async initialize of module."""
@@ -266,6 +316,58 @@ class WebserverController(CoreController):
                 self.publish_port,
                 base_url,
             )
+
+        # Create SSL context if SSL is enabled
+        ssl_context = None
+        ssl_enabled = config.get_value(CONF_ENABLE_SSL, False)
+        if ssl_enabled:
+            ssl_certificate = config.get_value(CONF_SSL_CERTIFICATE)
+            ssl_private_key = config.get_value(CONF_SSL_PRIVATE_KEY)
+
+            if not ssl_certificate or not ssl_private_key:
+                self.logger.error(
+                    "SSL is enabled but certificate or private key is missing. "
+                    "Webserver will start without SSL."
+                )
+            else:
+                try:
+                    # Create SSL context
+                    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+
+                    # Write certificate and key to temporary files
+                    # This is necessary because ssl.SSLContext.load_cert_chain requires file paths
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".pem", delete=False
+                    ) as cert_file:
+                        cert_file.write(str(ssl_certificate))
+                        cert_path = cert_file.name
+
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".pem", delete=False
+                    ) as key_file:
+                        key_file.write(str(ssl_private_key))
+                        key_path = key_file.name
+
+                    try:
+                        # Load certificate and private key
+                        ssl_context.load_cert_chain(cert_path, key_path)
+                        self.logger.info("SSL/TLS enabled for webserver")
+                    finally:
+                        # Clean up temporary files
+                        try:
+                            Path(cert_path).unlink()
+                            Path(key_path).unlink()
+                        except Exception as cleanup_err:
+                            self.logger.debug(
+                                "Failed to cleanup temporary SSL files: %s", cleanup_err
+                            )
+
+                except Exception as e:
+                    self.logger.exception(
+                        "Failed to create SSL context: %s. Webserver will start without SSL.", e
+                    )
+                    ssl_context = None
+
         await self._server.setup(
             bind_ip=bind_ip,
             bind_port=self.publish_port,
@@ -276,6 +378,7 @@ class WebserverController(CoreController):
             ingress_tcp_site_params=ingress_tcp_site_params,
             # Add mass object to app for use in auth middleware
             app_state={"mass": self.mass},
+            ssl_context=ssl_context,
         )
         if self.mass.running_as_hass_addon:
             # announce to HA supervisor
