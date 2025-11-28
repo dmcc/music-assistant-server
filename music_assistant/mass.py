@@ -284,7 +284,12 @@ class MusicAssistant:
             x
             for x in self._providers.values()
             if (provider_type is None or provider_type == x.type)
-            and (not user_provider_filter or x.instance_id in user_provider_filter)
+            # handle optional user (music) provider filter
+            and (
+                not user_provider_filter
+                or x.instance_id in user_provider_filter
+                or x.type != ProviderType.MUSIC
+            )
         ]
 
     @api_command("logging/get")

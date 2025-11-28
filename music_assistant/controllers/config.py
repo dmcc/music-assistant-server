@@ -65,7 +65,6 @@ from music_assistant.constants import (
     DEFAULT_PROVIDER_CONFIG_ENTRIES,
     ENCRYPT_SUFFIX,
 )
-from music_assistant.controllers.webserver.helpers.auth_middleware import get_current_user
 from music_assistant.helpers.api import api_command
 from music_assistant.helpers.json import JSON_DECODE_EXCEPTIONS, async_json_dumps, async_json_loads
 from music_assistant.helpers.util import load_provider_module
@@ -193,7 +192,7 @@ class ConfigController:
 
         self.save()
 
-    @api_command("config/providers")
+    @api_command("config/providers", required_role="admin")
     async def get_provider_configs(
         self,
         provider_type: ProviderType | None = None,
@@ -201,9 +200,6 @@ class ConfigController:
         include_values: bool = False,
     ) -> list[ProviderConfig]:
         """Return all known provider configurations, optionally filtered by ProviderType."""
-        user = get_current_user()
-        user_provider_filter = user.provider_filter if user else None
-
         raw_values = self.get(CONF_PROVIDERS, {})
         prov_entries = {x.domain for x in self.mass.get_provider_manifests()}
         return [
@@ -215,11 +211,9 @@ class ConfigController:
             and (provider_domain is None or prov_conf["domain"] == provider_domain)
             # guard for deleted providers
             and prov_conf["domain"] in prov_entries
-            # filter by user's provider_filter if set
-            and (not user_provider_filter or prov_conf["instance_id"] in user_provider_filter)
         ]
 
-    @api_command("config/providers/get")
+    @api_command("config/providers/get", required_role="admin")
     async def get_provider_config(self, instance_id: str) -> ProviderConfig:
         """Return configuration for a single provider."""
         if raw_conf := self.get(f"{CONF_PROVIDERS}/{instance_id}", {}):
