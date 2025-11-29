@@ -61,6 +61,7 @@ from music_assistant.constants import (
     PROVIDERS_WITH_SHAREABLE_URLS,
 )
 from music_assistant.controllers.streams.smart_fades.fades import SMART_CROSSFADE_DURATION
+from music_assistant.controllers.webserver.helpers.auth_middleware import get_current_user
 from music_assistant.helpers.api import api_command
 from music_assistant.helpers.compare import compare_strings, compare_version, create_safe_string
 from music_assistant.helpers.database import DatabaseConnection
@@ -482,16 +483,25 @@ class MusicController(CoreController):
         db_rows = await self.mass.music.database.get_rows_from_query(query, limit=limit)
         result: list[ItemMapping] = []
         available_providers = ("library", *get_global_cache_value("available_providers", []))
+
+        # Get user provider filter if set
+        user = get_current_user()
+        user_provider_filter = user.provider_filter if user and user.provider_filter else None
+
         for db_row in db_rows:
+            provider = db_row["provider"]
+            # Apply user provider filter
+            if user_provider_filter and provider not in user_provider_filter:
+                continue
             result.append(
                 ItemMapping.from_dict(
                     {
                         "item_id": db_row["item_id"],
-                        "provider": db_row["provider"],
+                        "provider": provider,
                         "media_type": db_row["media_type"],
                         "name": db_row["name"],
                         "image": json_loads(db_row["image"]) if db_row["image"] else None,
-                        "available": db_row["provider"] in available_providers,
+                        "available": provider in available_providers,
                     }
                 )
             )
@@ -516,16 +526,25 @@ class MusicController(CoreController):
         )
         db_rows = await self.mass.music.database.get_rows_from_query(query, limit=limit)
         result: list[ItemMapping] = []
+
+        # Get user provider filter if set
+        user = get_current_user()
+        user_provider_filter = user.provider_filter if user and user.provider_filter else None
+
         for db_row in db_rows:
+            provider = db_row["provider"]
+            # Apply user provider filter
+            if user_provider_filter and provider not in user_provider_filter:
+                continue
             result.append(
                 ItemMapping.from_dict(
                     {
                         "item_id": db_row["item_id"],
-                        "provider": db_row["provider"],
+                        "provider": provider,
                         "media_type": db_row["media_type"],
                         "name": db_row["name"],
                         "image": json_loads(db_row["image"]) if db_row["image"] else None,
-                        "available": db_row["provider"] in available_providers,
+                        "available": provider in available_providers,
                     }
                 )
             )
