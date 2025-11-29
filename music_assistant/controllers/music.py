@@ -93,7 +93,7 @@ CONF_RESET_DB = "reset_db"
 DEFAULT_SYNC_INTERVAL = 12 * 60  # default sync interval in minutes
 CONF_SYNC_INTERVAL = "sync_interval"
 CONF_DELETED_PROVIDERS = "deleted_providers"
-DB_SCHEMA_VERSION: Final[int] = 21
+DB_SCHEMA_VERSION: Final[int] = 22
 
 CACHE_CATEGORY_LAST_SYNC: Final[int] = 9
 
@@ -466,7 +466,7 @@ class MusicController(CoreController):
 
     @api_command("music/recently_played_items")
     async def recently_played(
-        self, limit: int = 10, media_types: list[MediaType] | None = None
+        self, limit: int = 10, media_types: list[MediaType] | None = None, all_users: bool = True
     ) -> list[ItemMapping]:
         """Return a list of the last played items."""
         if media_types is None:
@@ -478,8 +478,10 @@ class MusicController(CoreController):
             f"SELECT * FROM {DB_TABLE_PLAYLOG} "
             f"WHERE media_type in {media_types_str} AND fully_played = 1 "
             f"AND provider in {available_providers_str} "
-            "ORDER BY timestamp DESC"
         )
+        if not all_users and (user := get_current_user()):
+            query += f"AND userid = '{user.user_id}' "
+        query += "ORDER BY timestamp DESC"
         db_rows = await self.mass.music.database.get_rows_from_query(query, limit=limit)
         result: list[ItemMapping] = []
         available_providers = ("library", *get_global_cache_value("available_providers", []))
@@ -513,7 +515,9 @@ class MusicController(CoreController):
         return await self.tracks.library_items(limit=limit, order_by="timestamp_added_desc")
 
     @api_command("music/in_progress_items")
-    async def in_progress_items(self, limit: int = 10) -> list[ItemMapping]:
+    async def in_progress_items(
+        self, limit: int = 10, all_users: bool = False
+    ) -> list[ItemMapping]:
         """Return a list of the Audiobooks and PodcastEpisodes that are in progress."""
         available_providers = ("library", *get_global_cache_value("unique_providers", []))
         available_providers_str = "(" + ",".join(f'"{x}"' for x in available_providers) + ")"
@@ -522,8 +526,11 @@ class MusicController(CoreController):
             f"WHERE media_type in ('audiobook', 'podcast_episode') AND fully_played = 0 "
             f"AND provider in {available_providers_str} "
             "AND seconds_played > 0 "
-            "ORDER BY timestamp DESC"
         )
+        if not all_users and (user := get_current_user()):
+            query += f"AND userid = '{user.user_id}' "
+
+        query += "ORDER BY timestamp DESC"
         db_rows = await self.mass.music.database.get_rows_from_query(query, limit=limit)
         result: list[ItemMapping] = []
 
@@ -981,8 +988,19 @@ class MusicController(CoreController):
         fully_played: bool = True,
         seconds_played: int | None = None,
         is_playing: bool = False,
+        userid: str | None = None,
+        all_users: bool = False,
     ) -> None:
-        """Mark item as played in playlog."""
+        """
+        Mark item as played in playlog.
+
+        :param media_item: The media item to mark as played.
+        :param fully_played: If True, mark the item as fully played.
+        :param seconds_played: The number of seconds played.
+        :param is_playing: If True, the item is currently playing.
+        :param userid: The user ID to mark the item as played for (instead of the current user).
+        :param all_users: If True, mark the item as played for all users.
+        """
         timestamp = utc_timestamp()
         if (
             media_item.provider.startswith("builtin")
@@ -992,22 +1010,28 @@ class MusicController(CoreController):
             # one-off items like TTS or some sound effect etc.
             return
 
+        params = {
+            "item_id": media_item.item_id,
+            "provider": media_item.provider,
+            "media_type": media_item.media_type.value,
+            "name": media_item.name,
+            "image": serialize_to_json(media_item.image.to_dict()) if media_item.image else None,
+            "fully_played": fully_played,
+            "seconds_played": seconds_played,
+            "timestamp": timestamp,
+        }
+        if not all_users:
+            if not userid:
+                current_user = get_current_user()
+                userid = current_user.user_id if current_user else None
+            if userid:
+                params["userid"] = userid
+
         # update generic playlog table (when not playing)
         if not is_playing:
             await self.database.insert(
                 DB_TABLE_PLAYLOG,
-                {
-                    "item_id": media_item.item_id,
-                    "provider": media_item.provider,
-                    "media_type": media_item.media_type.value,
-                    "name": media_item.name,
-                    "image": serialize_to_json(media_item.image.to_dict())
-                    if media_item.image
-                    else None,
-                    "fully_played": fully_played,
-                    "seconds_played": seconds_played,
-                    "timestamp": timestamp,
-                },
+                params,
                 allow_replace=True,
             )
 
@@ -1043,17 +1067,24 @@ class MusicController(CoreController):
     async def mark_item_unplayed(
         self,
         media_item: MediaItemType,
+        all_users: bool = False,
     ) -> None:
-        """Mark item as unplayed in playlog."""
-        # update generic playlog table
-        await self.database.delete(
-            DB_TABLE_PLAYLOG,
-            {
-                "item_id": media_item.item_id,
-                "provider": media_item.provider,
-                "media_type": media_item.media_type.value,
-            },
-        )
+        """
+        Mark item as unplayed in playlog.
+
+        :param media_item: The media item to mark as unplayed.
+        :param all_users: If True, mark the item as unplayed for all users.
+        """
+        current_user = get_current_user()
+        user_id = current_user.user_id if current_user else "system"
+        params = {
+            "item_id": media_item.item_id,
+            "provider": media_item.provider,
+            "media_type": media_item.media_type.value,
+        }
+        if not all_users:
+            params["userid"] = user_id
+        await self.database.delete(DB_TABLE_PLAYLOG, params)
         # forward to provider(s) to sync resume state (e.g. for audiobooks)
         for prov_mapping in media_item.provider_mappings:
             if music_prov := self.mass.get_provider(prov_mapping.provider_instance):
@@ -1155,7 +1186,9 @@ class MusicController(CoreController):
         # no match found
         return None
 
-    async def get_resume_position(self, media_item: Audiobook | PodcastEpisode) -> tuple[bool, int]:
+    async def get_resume_position(
+        self, media_item: Audiobook | PodcastEpisode, userid: str | None = None
+    ) -> tuple[bool, int]:
         """
         Get progress (resume point) details for the given audiobook or episode.
 
@@ -1188,14 +1221,14 @@ class MusicController(CoreController):
         # Get MA's internal position from playlog
         ma_fully_played = False
         ma_position_ms = 0
-        if db_entry := await self.database.get_row(
-            DB_TABLE_PLAYLOG,
-            {
-                "media_type": media_item.media_type.value,
-                "item_id": media_item.item_id,
-                "provider": media_item.provider,
-            },
-        ):
+        params = {
+            "media_type": media_item.media_type.value,
+            "item_id": media_item.item_id,
+            "provider": media_item.provider,
+        }
+        if userid:
+            params["userid"] = userid
+        if db_entry := await self.database.get_row(DB_TABLE_PLAYLOG, params):
             ma_position_ms = db_entry["seconds_played"] * 1000 if db_entry["seconds_played"] else 0
             ma_fully_played = db_entry["fully_played"]
 
@@ -1811,6 +1844,28 @@ class MusicController(CoreController):
             await self._database.execute(f"DROP TABLE IF EXISTS {DB_TABLE_SMART_FADES_ANALYSIS}")
             await self.__create_database_tables()
 
+        if prev_version <= 22:
+            # add userid column to playlog table
+            try:
+                await self._database.execute(
+                    f"ALTER TABLE {DB_TABLE_PLAYLOG} ADD COLUMN userid TEXT"
+                )
+            except Exception as err:
+                if "duplicate column" not in str(err):
+                    raise
+            # Note: SQLite doesn't support modifying constraints directly
+            # The UNIQUE constraint will be updated when the table is recreated
+            # For now, we'll keep the old constraint and add a new one via unique index
+            try:
+                await self._database.execute(f"DROP INDEX IF EXISTS {DB_TABLE_PLAYLOG}_unique_idx")
+                await self._database.execute(
+                    f"CREATE UNIQUE INDEX {DB_TABLE_PLAYLOG}_unique_idx "
+                    f"ON {DB_TABLE_PLAYLOG}(item_id,provider,media_type,userid)"
+                )
+            except Exception as err:
+                # If we can't create the index due to duplicate entries, log and continue
+                self.logger.warning("Could not create unique index on playlog: %s", err)
+
         # save changes
         await self._database.commit()
 
@@ -1846,7 +1901,8 @@ class MusicController(CoreController):
                 [timestamp] INTEGER DEFAULT 0,
                 [fully_played] BOOLEAN,
                 [seconds_played] INTEGER,
-                UNIQUE(item_id, provider, media_type));"""
+                [userid] TEXT NOT NULL,
+                UNIQUE(item_id, provider, media_type, userid));"""
         )
         await self.database.execute(
             f"""CREATE TABLE IF NOT EXISTS {DB_TABLE_ALBUMS}(
@@ -2165,6 +2221,11 @@ class MusicController(CoreController):
         await self.database.execute(
             f"CREATE INDEX IF NOT EXISTS {DB_TABLE_SMART_FADES_ANALYSIS}_idx "
             f"on {DB_TABLE_SMART_FADES_ANALYSIS}(item_id,provider,fragment);"
+        )
+        # unique index on playlog table
+        await self.database.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {DB_TABLE_PLAYLOG}_unique_idx "
+            f"on {DB_TABLE_PLAYLOG}(item_id,provider,media_type,userid);"
         )
         await self.database.commit()
 

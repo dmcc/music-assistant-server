@@ -437,6 +437,19 @@ class AuthenticationManager:
             provider_filter=json_loads(user_row["provider_filter"]),
         )
 
+    async def get_user_by_username(self, username: str) -> User | None:
+        """
+        Get user by username.
+
+        :param username: The username.
+        :return: User object or None if not found.
+        """
+        user_row = await self.database.get_row("users", {"username": username})
+        if not user_row:
+            return None
+
+        return await self.get_user(user_row["user_id"])
+
     async def get_user_by_provider_link(
         self, provider_type: AuthProviderType, provider_user_id: str
     ) -> User | None:

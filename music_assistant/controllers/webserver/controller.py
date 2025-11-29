@@ -36,6 +36,7 @@ from music_assistant.constants import (
     CONF_BIND_IP,
     CONF_BIND_PORT,
     CONF_ONBOARD_DONE,
+    DB_TABLE_PLAYLOG,
     RESOURCES_DIR,
     VERBOSE_LOG_LEVEL,
 )
@@ -1067,6 +1068,9 @@ class WebserverController(CoreController):
             )
             token = await self.auth.create_token(user, device_name)
 
+            # Migrate existing playlog entries to this first user
+            await self._migrate_playlog_to_first_user(user.user_id)
+
             # Mark onboarding as complete
             self.mass.config.set(CONF_ONBOARD_DONE, True)
             self.mass.config.save(immediate=True)
@@ -1086,6 +1090,27 @@ class WebserverController(CoreController):
             return web.json_response(
                 {"success": False, "error": f"Setup failed: {e!s}"}, status=500
             )
+
+    async def _migrate_playlog_to_first_user(self, user_id: str) -> None:
+        """
+        Migrate all existing playlog entries to the first user.
+
+        This is called during onboarding when the first admin user is created.
+        All existing playlog entries (which have NULL userid) will be updated
+        to belong to this first user.
+
+        :param user_id: The user ID of the first admin user.
+        """
+        try:
+            # Update all playlog entries with NULL userid to this user
+            await self.mass.music.database.execute(
+                f"UPDATE {DB_TABLE_PLAYLOG} SET userid = :userid WHERE userid IS NULL",
+                {"userid": user_id},
+            )
+            await self.mass.music.database.commit()
+            self.logger.info("Migrated existing playlog entries to first user: %s", user_id)
+        except Exception as err:
+            self.logger.warning("Failed to migrate playlog entries: %s", err)
 
     async def _get_ingress_user(self, request: web.Request) -> User | None:
         """
