@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 import os
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
@@ -1326,7 +1327,7 @@ class ConfigController:
         filename_backup = f"{self.filename}.backup"
         # make backup before we write a new file
         if await isfile(self.filename):
-            if await isfile(filename_backup):
+            with contextlib.suppress(FileNotFoundError):
                 await remove(filename_backup)
             await rename(self.filename, filename_backup)
 
