@@ -619,8 +619,8 @@ class WebserverController(CoreController):
                 quoted_return = urllib.parse.quote(return_url, safe="")
                 setup_url = f"setup?return_url={quoted_return}"
             else:
-                # Default: redirect back to current directory (relative path)
-                setup_url = "setup?return_url=."
+                # No return URL - just redirect to setup without the parameter
+                setup_url = "setup"
             return web.Response(status=302, headers={"Location": setup_url})
 
         # Serve the Vue frontend index.html
@@ -1045,7 +1045,7 @@ class WebserverController(CoreController):
                     )
 
                 # Add password authentication to existing user
-                password_hash = builtin_provider._hash_password(password, username)
+                password_hash = builtin_provider._hash_password(password, user.user_id)
                 await self.auth.link_user_to_provider(user, AuthProviderType.BUILTIN, password_hash)
             else:
                 # Create new admin user with password
