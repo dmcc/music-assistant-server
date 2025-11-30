@@ -614,13 +614,13 @@ class WebserverController(CoreController):
         # If not yet onboarded, redirect to setup
         if not self.mass.config.onboard_done or not await self.auth.has_users():
             # Preserve return_url parameter if present (will be passed back after setup)
-            # The setup page will add onboard=true when redirecting back
             return_url = request.query.get("return_url")
             if return_url:
-                setup_url = f"/setup?return_url={urllib.parse.quote(return_url, safe='')}"
+                quoted_return = urllib.parse.quote(return_url, safe="")
+                setup_url = f"setup?return_url={quoted_return}"
             else:
-                # Default: redirect back to root (index) after setup with onboard=true
-                setup_url = f"/setup?return_url={urllib.parse.quote('/', safe='')}"
+                # Default: redirect back to current directory (relative path)
+                setup_url = "setup?return_url=."
             return web.Response(status=302, headers={"Location": setup_url})
 
         # Serve the Vue frontend index.html
