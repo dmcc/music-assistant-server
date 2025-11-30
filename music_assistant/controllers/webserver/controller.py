@@ -1070,6 +1070,10 @@ class WebserverController(CoreController):
 
             self.logger.info("First admin user created: %s", username)
 
+            # Announce to Home Assistant now that onboarding is complete
+            if self.mass.running_as_hass_addon:
+                await self._announce_to_homeassistant()
+
             return web.json_response(
                 {
                     "success": True,
@@ -1151,6 +1155,12 @@ class WebserverController(CoreController):
 
     async def _announce_to_homeassistant(self) -> None:
         """Announce Music Assistant Ingress server to Home Assistant via Supervisor API."""
+        # Only announce if server is onboarded to prevent race condition
+        # where HA integration ignores servers that are not yet onboarded
+        if not self.mass.config.onboard_done:
+            self.logger.debug("Skipping HA announcement - server not yet onboarded")
+            return
+
         supervisor_token = os.environ["SUPERVISOR_TOKEN"]
         addon_hostname = os.environ["HOSTNAME"]
 
