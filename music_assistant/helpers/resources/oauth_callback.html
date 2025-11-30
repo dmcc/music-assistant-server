@@ -242,27 +242,45 @@
             }
 
             if (isPopup) {
-                statusEl.textContent = 'Login Complete!';
-                messageEl.textContent = 'Closing popup...';
+                const isExternalRedirect = redirectUrl && !redirectUrl.startsWith(window.location.origin);
 
-                if (window.opener && !window.opener.closed) {
-                    try {
-                        window.opener.postMessage({
-                            type: 'oauth_success',
-                            token: token,
-                            redirectUrl: redirectUrl
-                        }, window.location.origin);
-                    } catch (e) {
-                        // Silently fail
-                    }
-                }
+                if (isExternalRedirect) {
+                    // External redirect - must redirect to complete OAuth flow
+                    statusEl.textContent = 'Authentication Successful';
+                    messageEl.textContent = 'Redirecting...';
 
-                setTimeout(() => {
-                    attemptAutoClose();
-                    setTimeout(() => {
+                    if (isValidRedirectUrl(redirectUrl)) {
+                        setTimeout(() => {
+                            window.location.href = redirectUrl;
+                        }, 500);
+                    } else {
+                        messageEl.textContent = 'Redirect failed. Please close this window.';
                         showManualCloseButton();
-                    }, 300);
-                }, 100);
+                    }
+                } else {
+                    // Internal redirect - close popup and post message
+                    statusEl.textContent = 'Login Complete!';
+                    messageEl.textContent = 'Closing popup...';
+
+                    if (window.opener && !window.opener.closed) {
+                        try {
+                            window.opener.postMessage({
+                                type: 'oauth_success',
+                                token: token,
+                                redirectUrl: redirectUrl
+                            }, window.location.origin);
+                        } catch (e) {
+                            // Silently fail
+                        }
+                    }
+
+                    setTimeout(() => {
+                        attemptAutoClose();
+                        setTimeout(() => {
+                            showManualCloseButton();
+                        }, 300);
+                    }, 100);
+                }
             } else {
                 statusEl.textContent = 'Authentication Successful';
                 messageEl.textContent = 'Redirecting...';

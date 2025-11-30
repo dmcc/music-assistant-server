@@ -416,6 +416,18 @@ class BuiltinLoginProvider(LoginProvider):
 class HomeAssistantOAuthProvider(LoginProvider):
     """Home Assistant OAuth login provider."""
 
+    def __init__(self, mass: MusicAssistant, provider_id: str, config: LoginProviderConfig) -> None:
+        """
+        Initialize Home Assistant OAuth provider.
+
+        :param mass: MusicAssistant instance.
+        :param provider_id: Unique identifier for this provider instance.
+        :param config: Provider-specific configuration.
+        """
+        super().__init__(mass, provider_id, config)
+        # Store OAuth state -> return_url mapping to support concurrent sessions
+        self._oauth_sessions: dict[str, str | None] = {}
+
     @property
     def provider_type(self) -> AuthProviderType:
         """Return the provider type."""
@@ -528,9 +540,9 @@ class HomeAssistantOAuthProvider(LoginProvider):
             ha_url = inferred_ha_url
 
         state = secrets.token_urlsafe(32)
-        # Store state and return_url for verification and final redirect
-        self._oauth_state = state
-        self._oauth_return_url = return_url
+        # Store return_url keyed by state to support concurrent OAuth sessions
+        # This prevents race conditions when multiple users/sessions login simultaneously
+        self._oauth_sessions[state] = return_url
 
         # Use base_url of callback as client_id (same as HA provider does)
         client_id = base_url(redirect_uri)
@@ -681,9 +693,12 @@ class HomeAssistantOAuthProvider(LoginProvider):
         :param state: OAuth state parameter.
         :param redirect_uri: The callback URL.
         """
-        # Verify state
-        if not hasattr(self, "_oauth_state") or state != self._oauth_state:
-            return AuthResult(success=False, error="Invalid state parameter")
+        # Verify state and retrieve return_url from session
+        if state not in self._oauth_sessions:
+            return AuthResult(success=False, error="Invalid or expired state parameter")
+
+        # Retrieve and remove the return_url for this session (cleanup)
+        return_url = self._oauth_sessions.pop(state)
 
         # Get the correct HA URL (external URL if running as add-on)
         # This must be the same URL used in get_authorization_url
@@ -730,9 +745,6 @@ class HomeAssistantOAuthProvider(LoginProvider):
 
             # Get or create user
             user = await self._get_or_create_user(username, display_name, ha_user_id)
-
-            # Get stored return_url from OAuth state
-            return_url = getattr(self, "_oauth_return_url", None)
 
             if not user:
                 return AuthResult(
