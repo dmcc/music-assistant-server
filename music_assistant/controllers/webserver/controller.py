@@ -820,7 +820,7 @@ class WebserverController(CoreController):
             self.logger.exception("Error during OAuth authorization")
             return web.json_response({"error": "Authorization failed"}, status=500)
 
-    async def _handle_auth_callback(self, request: web.Request) -> web.Response:
+    async def _handle_auth_callback(self, request: web.Request) -> web.Response:  # noqa: PLR0915
         """Handle OAuth callback."""
         try:
             code = request.query.get("code")
@@ -852,27 +852,20 @@ class WebserverController(CoreController):
             device_name = f"OAuth ({provider_id})"
             token = await self.auth.create_token(auth_result.user, device_name)
 
-            # Check if this is a remote client OAuth flow
             if auth_result.return_url and auth_result.return_url.startswith(
                 "urn:ietf:wg:oauth:2.0:oob:auto:"
             ):
-                # Extract session ID from return URL
                 session_id = auth_result.return_url.split(":")[-1]
-                # Store token in pending sessions
                 if session_id in self.auth._pending_oauth_sessions:
                     self.auth._pending_oauth_sessions[session_id] = token
-                    # Show success page for remote auth
-                    success_html = """
-                    <html>
-                    <head><title>Authentication Successful</title></head>
-                    <body style="font-family: Arial, sans-serif; text-align: center;
-                                 padding: 50px;">
-                        <h1 style="color: #4CAF50;">✓ Authentication Successful</h1>
-                        <p>You have successfully authenticated with Music Assistant.</p>
-                        <p>You can now close this window and return to your application.</p>
-                    </body>
-                    </html>
-                    """
+                    oauth_callback_html_path = str(RESOURCES_DIR.joinpath("oauth_callback.html"))
+                    async with aiofiles.open(oauth_callback_html_path) as f:
+                        success_html = await f.read()
+
+                    success_html = success_html.replace("{TOKEN}", token)
+                    success_html = success_html.replace("{REDIRECT_URL}", "about:blank")
+                    success_html = success_html.replace("{REQUIRES_CONSENT}", "false")
+
                     return web.Response(text=success_html, content_type="text/html")
 
             # Determine redirect URL (use return_url from OAuth flow or default to root)
