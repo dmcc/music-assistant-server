@@ -43,7 +43,6 @@ from music_assistant.controllers.metadata import MetaDataController
 from music_assistant.controllers.music import MusicController
 from music_assistant.controllers.player_queues import PlayerQueuesController
 from music_assistant.controllers.players.player_controller import PlayerController
-from music_assistant.controllers.remote_access import RemoteAccessController
 from music_assistant.controllers.streams import StreamsController
 from music_assistant.controllers.webserver import WebserverController
 from music_assistant.controllers.webserver.helpers.auth_middleware import get_current_user
@@ -112,7 +111,6 @@ class MusicAssistant:
     players: PlayerController
     player_queues: PlayerQueuesController
     streams: StreamsController
-    remote_access: RemoteAccessController
     _aiobrowser: AsyncServiceBrowser
 
     def __init__(self, storage_path: str, cache_path: str, safe_mode: bool = False) -> None:
@@ -168,7 +166,6 @@ class MusicAssistant:
         self.players = PlayerController(self)
         self.player_queues = PlayerQueuesController(self)
         self.streams = StreamsController(self)
-        self.remote_access = RemoteAccessController(self)
         # add manifests for core controllers
         for controller_name in CONFIGURABLE_CORE_CONTROLLERS:
             controller: CoreController = getattr(self, controller_name)
@@ -184,8 +181,6 @@ class MusicAssistant:
         # not yet available while we're starting (or performing migrations)
         self._register_api_commands()
         await self.webserver.setup(await self.config.get_core_config("webserver"))
-        # setup remote access after webserver (it needs webserver's port)
-        await self.remote_access.setup(await self.config.get_core_config("remote_access"))
         # setup discovery
         await self._setup_discovery()
         # load providers
@@ -207,7 +202,6 @@ class MusicAssistant:
         )
         # stop core controllers
         await self.streams.close()
-        await self.remote_access.close()
         await self.webserver.close()
         await self.metadata.close()
         await self.music.close()

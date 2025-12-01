@@ -426,9 +426,6 @@ class ConfigController:
             config = await self._update_provider_config(instance_id, values)
         else:
             config = await self._add_provider_config(provider_domain, values)
-        # mark onboard done whenever the (first) provider is added
-        # this will be replaced later by a more sophisticated onboarding process
-        self.set(CONF_ONBOARD_DONE, True)
         # return full config, just in case
         return await self.get_provider_config(config.instance_id)
 

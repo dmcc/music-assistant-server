@@ -70,6 +70,7 @@ class WebRTCGateway:
 
     def __init__(
         self,
+        http_session: aiohttp.ClientSession,
         signaling_url: str = "wss://signaling.music-assistant.io/ws",
         local_ws_url: str = "ws://localhost:8095/ws",
         ice_servers: list[dict[str, Any]] | None = None,
@@ -78,12 +79,14 @@ class WebRTCGateway:
     ) -> None:
         """Initialize the WebRTC Gateway.
 
+        :param http_session: Shared aiohttp ClientSession to use for HTTP/WebSocket connections.
         :param signaling_url: WebSocket URL of the signaling server.
         :param local_ws_url: Local WebSocket URL to bridge to.
         :param ice_servers: List of ICE server configurations.
         :param remote_id: Optional Remote ID to use (generated if not provided).
         :param on_remote_id_ready: Callback when Remote ID is registered.
         """
+        self.http_session = http_session
         self.signaling_url = signaling_url
         self.local_ws_url = local_ws_url
         self.remote_id = remote_id or generate_remote_id()
@@ -98,7 +101,6 @@ class WebRTCGateway:
 
         self.sessions: dict[str, WebRTCSession] = {}
         self._signaling_ws: aiohttp.ClientWebSocketResponse | None = None
-        self._signaling_session: aiohttp.ClientSession | None = None
         self._running = False
         self._reconnect_delay = 5
         self._max_reconnect_delay = 60
@@ -141,12 +143,6 @@ class WebRTCGateway:
             except Exception:
                 self.logger.debug("Error closing signaling WebSocket", exc_info=True)
 
-        if self._signaling_session and not self._signaling_session.closed:
-            try:
-                await self._signaling_session.close()
-            except Exception:
-                self.logger.debug("Error closing signaling session", exc_info=True)
-
         # Cancel run task
         if self._run_task and not self._run_task.done():
             self._run_task.cancel()
@@ -154,7 +150,6 @@ class WebRTCGateway:
                 await self._run_task
 
         self._signaling_ws = None
-        self._signaling_session = None
 
     async def _run(self) -> None:
         """Run the main loop with reconnection logic."""
@@ -188,16 +183,8 @@ class WebRTCGateway:
     async def _connect_to_signaling(self) -> None:
         """Connect to the signaling server."""
         self.logger.info("Connecting to signaling server: %s", self.signaling_url)
-        # Create session with increased timeout for WebSocket connection
-        timeout = aiohttp.ClientTimeout(
-            total=None,  # No total timeout for WebSocket connections
-            connect=30,  # 30 seconds to establish connection
-            sock_connect=30,  # 30 seconds for socket connection
-            sock_read=None,  # No timeout for reading (we handle ping/pong)
-        )
-        self._signaling_session = aiohttp.ClientSession(timeout=timeout)
         try:
-            self._signaling_ws = await self._signaling_session.ws_connect(
+            self._signaling_ws = await self.http_session.ws_connect(
                 self.signaling_url,
                 heartbeat=30,  # Send WebSocket ping every 30 seconds
                 autoping=True,  # Automatically respond to pings
@@ -256,9 +243,6 @@ class WebRTCGateway:
             self.logger.exception("Unexpected error in signaling connection")
         finally:
             self._is_connected = False
-            if self._signaling_session:
-                await self._signaling_session.close()
-                self._signaling_session = None
             self._signaling_ws = None
 
     async def _register(self) -> None:
@@ -501,16 +485,13 @@ class WebRTCGateway:
         channel = session.data_channel
         if not channel:
             return
-        local_session = aiohttp.ClientSession()
         try:
-            session.local_ws = await local_session.ws_connect(self.local_ws_url)
+            session.local_ws = await self.http_session.ws_connect(self.local_ws_url)
             loop = asyncio.get_event_loop()
 
             # Store task references for proper cleanup
             session.forward_to_local_task = asyncio.create_task(self._forward_to_local(session))
-            session.forward_from_local_task = asyncio.create_task(
-                self._forward_from_local(session, local_session)
-            )
+            session.forward_from_local_task = asyncio.create_task(self._forward_from_local(session))
 
             @channel.on("message")  # type: ignore[misc]
             def on_message(message: str) -> None:
@@ -526,7 +507,6 @@ class WebRTCGateway:
 
         except Exception:
             self.logger.exception("Failed to connect to local WebSocket")
-            await local_session.close()
 
     async def _forward_to_local(self, session: WebRTCSession) -> None:
         """Forward messages from WebRTC DataChannel to local WebSocket.
@@ -557,13 +537,10 @@ class WebRTCGateway:
         except Exception:
             self.logger.exception("Error forwarding to local WebSocket")
 
-    async def _forward_from_local(
-        self, session: WebRTCSession, local_session: aiohttp.ClientSession
-    ) -> None:
+    async def _forward_from_local(self, session: WebRTCSession) -> None:
         """Forward messages from local WebSocket to WebRTC DataChannel.
 
         :param session: The WebRTC session.
-        :param local_session: The aiohttp client session.
         """
         try:
             async for msg in session.local_ws:
@@ -580,8 +557,6 @@ class WebRTCGateway:
             raise
         except Exception:
             self.logger.exception("Error forwarding from local WebSocket")
-        finally:
-            await local_session.close()
 
     async def _handle_http_proxy_request(
         self, session: WebRTCSession, request_data: dict[str, Any]
@@ -605,11 +580,10 @@ class WebRTCGateway:
         self.logger.debug("HTTP proxy request: %s %s", method, local_http_url)
 
         try:
-            # Create a new HTTP client session for this request
-            async with (
-                aiohttp.ClientSession() as http_session,
-                http_session.request(method, local_http_url, headers=headers) as response,
-            ):
+            # Use shared HTTP session for this request
+            async with self.http_session.request(
+                method, local_http_url, headers=headers
+            ) as response:
                 # Read response body
                 body = await response.read()
 
