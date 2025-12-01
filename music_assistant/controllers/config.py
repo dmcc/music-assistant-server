@@ -1305,6 +1305,8 @@ class ConfigController:
         # migrate player configs: always use lookup key for provider
         prov_configs = self._data.get(CONF_PROVIDERS, {})
         for player_config in self._data.get(CONF_PLAYERS, {}).values():
+            if "provider" not in player_config:
+                continue
             player_provider = player_config["provider"]
             if prov_conf := prov_configs.get(player_provider):
                 if not (prov_manifest := self.mass.get_provider_manifest(prov_conf["domain"])):
