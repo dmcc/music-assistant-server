@@ -1,51 +1,106 @@
-"""Remote Access manager for Music Assistant webserver."""
+"""
+Remote Access Controller for Music Assistant.
+
+This controller manages WebRTC-based remote access to Music Assistant instances.
+It connects to a signaling server and handles incoming WebRTC connections,
+bridging them to the local WebSocket API.
+"""
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
-from music_assistant_models.enums import EventType
+from music_assistant_models.config_entries import ConfigEntry
+from music_assistant_models.enums import ConfigEntryType, EventType
 
-from music_assistant.constants import MASS_LOGGER_NAME
-from music_assistant.controllers.webserver.remote_access.gateway import (
-    WebRTCGateway,
-    generate_remote_id,
-)
+from music_assistant.controllers.remote_access.gateway import WebRTCGateway, generate_remote_id
 from music_assistant.helpers.api import api_command
+from music_assistant.models.core_controller import CoreController
 
 if TYPE_CHECKING:
+    from music_assistant_models.config_entries import ConfigValueType, CoreConfig
     from music_assistant_models.event import MassEvent
 
-    from music_assistant.controllers.webserver import WebserverController
-
-LOGGER = logging.getLogger(f"{MASS_LOGGER_NAME}.remote_access")
+    from music_assistant import MusicAssistant
 
 # Signaling server URL
 SIGNALING_SERVER_URL = "wss://signaling.music-assistant.io/ws"
 
-# Internal config key for storing the remote ID
-_CONF_REMOTE_ID = "remote_id"
+# Config keys
+CONF_REMOTE_ID = "remote_id"
+CONF_ENABLED = "enabled"
 
 
-class RemoteAccessManager:
-    """Manager for WebRTC-based remote access (part of webserver controller)."""
+class RemoteAccessController(CoreController):
+    """Core Controller for WebRTC-based remote access."""
 
-    def __init__(self, webserver: WebserverController) -> None:
-        """Initialize the remote access manager.
+    domain: str = "remote_access"
 
-        :param webserver: WebserverController instance.
+    def __init__(self, mass: MusicAssistant) -> None:
+        """Initialize the remote access controller.
+
+        :param mass: MusicAssistant instance.
         """
-        self.webserver = webserver
-        self.mass = webserver.mass
-        self.logger = LOGGER
+        super().__init__(mass)
+        self.manifest.name = "Remote Access"
+        self.manifest.description = (
+            "WebRTC-based remote access for connecting to Music Assistant "
+            "from outside your local network (requires Home Assistant Cloud subscription)"
+        )
+        self.manifest.icon = "cloud-lock"
         self.gateway: WebRTCGateway | None = None
         self._remote_id: str | None = None
         self._setup_done = False
 
-    async def setup(self) -> None:
-        """Initialize the remote access manager."""
-        self.logger.debug("RemoteAccessManager.setup() called")
+    async def get_config_entries(
+        self,
+        action: str | None = None,
+        values: dict[str, ConfigValueType] | None = None,
+    ) -> tuple[ConfigEntry, ...]:
+        """Return all Config Entries for this core module (if any)."""
+        entries = []
+
+        # Info alert about HA Cloud requirement
+        entries.append(
+            ConfigEntry(
+                key="remote_access_info",
+                type=ConfigEntryType.ALERT,
+                label="Remote Access requires an active Home Assistant Cloud subscription. "
+                "Once detected, remote access will be automatically enabled and you will "
+                "receive a unique Remote ID for connecting from outside your network.",
+                required=False,
+            )
+        )
+
+        entries.append(
+            ConfigEntry(
+                key=CONF_ENABLED,
+                type=ConfigEntryType.BOOLEAN,
+                default_value=True,
+                label="Enable Remote Access",
+                description="Enable WebRTC-based remote access when Home Assistant Cloud "
+                "subscription is detected. Disable this if you don't want to use remote access.",
+            )
+        )
+
+        entries.append(
+            ConfigEntry(
+                key=CONF_REMOTE_ID,
+                type=ConfigEntryType.STRING,
+                label="Remote ID",
+                description="Unique identifier for WebRTC remote access. "
+                "Generated automatically and should not be changed.",
+                required=False,
+                hidden=True,
+            )
+        )
+
+        return tuple(entries)
+
+    async def setup(self, config: CoreConfig) -> None:
+        """Async initialize of module."""
+        self.config = config
+        self.logger.debug("RemoteAccessController.setup() called")
 
         # Register API commands immediately
         self._register_api_commands()
@@ -88,6 +143,11 @@ class RemoteAccessManager:
             # Already set up
             return
 
+        # Check if remote access is enabled in config
+        if not self.config.get_value(CONF_ENABLED, True):
+            self.logger.info("Remote access is disabled in configuration")
+            return
+
         # Check if Home Assistant Cloud is available and active
         cloud_status = await self._check_ha_cloud_status()
         if not cloud_status:
@@ -99,14 +159,12 @@ class RemoteAccessManager:
         self.logger.info("Home Assistant Cloud subscription detected, enabling remote access")
 
         # Get or generate Remote ID
-        remote_id_value = self.webserver.config.get_value(_CONF_REMOTE_ID)
+        remote_id_value = self.config.get_value(CONF_REMOTE_ID)
         if not remote_id_value:
             # Generate new Remote ID and save it
             remote_id_value = generate_remote_id()
             # Save the Remote ID to config
-            self.mass.config.set_raw_core_config_value(
-                "webserver", _CONF_REMOTE_ID, remote_id_value
-            )
+            self.mass.config.set_raw_core_config_value(self.domain, CONF_REMOTE_ID, remote_id_value)
             self.mass.config.save(immediate=True)
             self.logger.info("Generated new Remote ID: %s", remote_id_value)
 
@@ -117,8 +175,9 @@ class RemoteAccessManager:
             self.logger.error("Invalid remote_id type: %s", type(remote_id_value))
             return
 
-        # Determine local WebSocket URL
-        bind_port_value = self.webserver.config.get_value("bind_port", 8095)
+        # Determine local WebSocket URL from webserver config
+        webserver_config = await self.mass.config.get_core_config("webserver")
+        bind_port_value = webserver_config.get_value("bind_port", 8095)
         bind_port = int(bind_port_value) if isinstance(bind_port_value, int) else 8095
         local_ws_url = f"ws://localhost:{bind_port}/ws"
 
