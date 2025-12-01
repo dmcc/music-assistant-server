@@ -8,7 +8,7 @@ bridging them to the local WebSocket API.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from music_assistant_models.config_entries import ConfigEntry
 from music_assistant_models.enums import ConfigEntryType, EventType
@@ -22,13 +22,14 @@ if TYPE_CHECKING:
     from music_assistant_models.event import MassEvent
 
     from music_assistant import MusicAssistant
+    from music_assistant.providers.hass import HomeAssistantProvider
 
 # Signaling server URL
 SIGNALING_SERVER_URL = "wss://signaling.music-assistant.io/ws"
 
 # Config keys
 CONF_REMOTE_ID = "remote_id"
-CONF_ENABLED = "enabled"
+CONF_ENABLED = "enable_remote_access"
 
 
 class RemoteAccessController(CoreController):
@@ -59,16 +60,16 @@ class RemoteAccessController(CoreController):
     ) -> tuple[ConfigEntry, ...]:
         """Return all Config Entries for this core module (if any)."""
         entries = []
+        has_ha_cloud = await self._check_ha_cloud_status()
 
         # Info alert about HA Cloud requirement
         entries.append(
             ConfigEntry(
                 key="remote_access_info",
                 type=ConfigEntryType.ALERT,
-                label="Remote Access requires an active Home Assistant Cloud subscription. "
-                "Once detected, remote access will be automatically enabled and you will "
-                "receive a unique Remote ID for connecting from outside your network.",
+                label="Remote Access requires an active Home Assistant Cloud subscription.",
                 required=False,
+                hidden=has_ha_cloud,
             )
         )
 
@@ -76,10 +77,21 @@ class RemoteAccessController(CoreController):
             ConfigEntry(
                 key=CONF_ENABLED,
                 type=ConfigEntryType.BOOLEAN,
-                default_value=True,
+                default_value=False,
                 label="Enable Remote Access",
-                description="Enable WebRTC-based remote access when Home Assistant Cloud "
-                "subscription is detected. Disable this if you don't want to use remote access.",
+                description="Enable WebRTC-based (encrypted), secure remote access to your "
+                "Music Assistant instance via https://app.music-assistant.io "
+                "or supported mobile apps. ",
+                hidden=not has_ha_cloud,
+            )
+        )
+        entries.append(
+            ConfigEntry(
+                key="remote_access_id_label",
+                type=ConfigEntryType.LABEL,
+                label=f"Remote Access ID: {self._remote_id}",
+                hidden=self._remote_id is None or not has_ha_cloud,
+                depends_on=CONF_ENABLED,
             )
         )
 
@@ -102,6 +114,17 @@ class RemoteAccessController(CoreController):
         self.config = config
         self.logger.debug("RemoteAccessController.setup() called")
 
+        # Get or generate Remote ID
+        remote_id_value = self.config.get_value(CONF_REMOTE_ID)
+        if not remote_id_value:
+            # Generate new Remote ID and save it
+            remote_id_value = generate_remote_id()
+            self._remote_id = remote_id_value
+            # Save the Remote ID to config
+            self.mass.config.set_raw_core_config_value(self.domain, CONF_REMOTE_ID, remote_id_value)
+            self.mass.config.save(immediate=True)
+            self.logger.debug("Generated new Remote ID: %s", remote_id_value)
+
         # Register API commands immediately
         self._register_api_commands()
 
@@ -116,14 +139,14 @@ class RemoteAccessController(CoreController):
         if self.gateway:
             await self.gateway.stop()
             self.gateway = None
-            self.logger.info("WebRTC Remote Access stopped")
+            self.logger.debug("WebRTC Remote Access stopped")
 
     def _on_remote_id_ready(self, remote_id: str) -> None:
         """Handle Remote ID registration with signaling server.
 
         :param remote_id: The registered Remote ID.
         """
-        self.logger.info("Remote ID registered with signaling server: %s", remote_id)
+        self.logger.debug("Remote ID registered with signaling server: %s", remote_id)
         self._remote_id = remote_id
 
     def _on_providers_updated(self, event: MassEvent) -> None:
@@ -145,41 +168,24 @@ class RemoteAccessController(CoreController):
 
         # Check if remote access is enabled in config
         if not self.config.get_value(CONF_ENABLED, True):
-            self.logger.info("Remote access is disabled in configuration")
             return
 
         # Check if Home Assistant Cloud is available and active
         cloud_status = await self._check_ha_cloud_status()
         if not cloud_status:
-            self.logger.debug("Home Assistant Cloud not available yet")
+            self.logger.debug("Home Assistant Cloud not available")
             return
 
         # Mark as done to prevent multiple attempts
         self._setup_done = True
         self.logger.info("Home Assistant Cloud subscription detected, enabling remote access")
 
-        # Get or generate Remote ID
-        remote_id_value = self.config.get_value(CONF_REMOTE_ID)
-        if not remote_id_value:
-            # Generate new Remote ID and save it
-            remote_id_value = generate_remote_id()
-            # Save the Remote ID to config
-            self.mass.config.set_raw_core_config_value(self.domain, CONF_REMOTE_ID, remote_id_value)
-            self.mass.config.save(immediate=True)
-            self.logger.info("Generated new Remote ID: %s", remote_id_value)
-
-        # Ensure remote_id is a string
-        if isinstance(remote_id_value, str):
-            self._remote_id = remote_id_value
-        else:
-            self.logger.error("Invalid remote_id type: %s", type(remote_id_value))
-            return
-
         # Determine local WebSocket URL from webserver config
-        webserver_config = await self.mass.config.get_core_config("webserver")
-        bind_port_value = webserver_config.get_value("bind_port", 8095)
-        bind_port = int(bind_port_value) if isinstance(bind_port_value, int) else 8095
-        local_ws_url = f"ws://localhost:{bind_port}/ws"
+        base_url = self.mass.webserver.base_url
+        local_ws_url = base_url.replace("http", "ws")
+        if not local_ws_url.endswith("/"):
+            local_ws_url += "/"
+        local_ws_url += "ws"
 
         # Get ICE servers from HA Cloud if available
         ice_servers = await self._get_ha_cloud_ice_servers()
@@ -202,22 +208,14 @@ class RemoteAccessController(CoreController):
         :return: True if HA Cloud is logged in and has active subscription.
         """
         # Find the Home Assistant provider
-        ha_provider = None
-        for provider in self.mass.providers:
-            if provider.domain == "hass" and provider.available:
-                ha_provider = provider
-                break
-
+        ha_provider = cast("HomeAssistantProvider | None", self.mass.get_provider("hass"))
         if not ha_provider:
             self.logger.debug("Home Assistant provider not found or not available")
             return False
 
         try:
             # Access the hass client from the provider
-            if not hasattr(ha_provider, "hass"):
-                self.logger.debug("Provider does not have hass attribute")
-                return False
-            hass_client = ha_provider.hass  # type: ignore[union-attr]
+            hass_client = ha_provider.hass
             if not hass_client or not hass_client.connected:
                 self.logger.debug("Home Assistant client not connected")
                 return False
@@ -230,10 +228,10 @@ class RemoteAccessController(CoreController):
             active_subscription = result.get("active_subscription", False)
 
             if logged_in and active_subscription:
-                self.logger.info("Home Assistant Cloud subscription is active")
+                self.logger.debug("Home Assistant Cloud subscription is active")
                 return True
 
-            self.logger.info(
+            self.logger.debug(
                 "Home Assistant Cloud not active (logged_in=%s, active_subscription=%s)",
                 logged_in,
                 active_subscription,
@@ -250,12 +248,7 @@ class RemoteAccessController(CoreController):
         :return: List of ICE server configurations or None if unavailable.
         """
         # Find the Home Assistant provider
-        ha_provider = None
-        for provider in self.mass.providers:
-            if provider.domain == "hass" and provider.available:
-                ha_provider = provider
-                break
-
+        ha_provider = cast("HomeAssistantProvider | None", self.mass.get_provider("hass"))
         if not ha_provider:
             return None
 
@@ -263,7 +256,7 @@ class RemoteAccessController(CoreController):
             # Access the hass client from the provider
             if not hasattr(ha_provider, "hass"):
                 return None
-            hass_client = ha_provider.hass  # type: ignore[union-attr]
+            hass_client = ha_provider.hass
             if not hass_client or not hass_client.connected:
                 return None
 
