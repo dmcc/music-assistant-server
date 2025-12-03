@@ -291,13 +291,23 @@ class WebserverController(CoreController):
         if not self.mass.config.onboard_done:
             self.logger.warning(
                 "\n\n################################################################################\n"
-                "Starting webserver on  %s:%s - base url: %s\n"
-                "If this is incorrect, see the documentation how to configure the Webserver\n"
-                "in Settings --> Core modules --> Webserver\n"
+                "###                           SETUP REQUIRED                                 ###\n"
+                "################################################################################\n"
+                "\n"
+                "Music Assistant is running in setup mode.\n"
+                "Please complete the setup by visiting:\n"
+                "\n"
+                "    %s/setup\n"
+                "\n"
+                "Webserver running on: %s:%s\n"
+                "\n"
+                "If this address is incorrect, see the documentation on how to configure\n"
+                "the Webserver in Settings --> Core modules --> Webserver\n"
+                "\n"
                 "################################################################################\n",
+                base_url,
                 bind_ip,
                 self.publish_port,
-                base_url,
             )
         else:
             self.logger.info(
@@ -467,6 +477,10 @@ class WebserverController(CoreController):
 
     async def _handle_jsonrpc_api_command(self, request: web.Request) -> web.Response:
         """Handle incoming JSON RPC API command."""
+        # Block until onboarding is complete
+        if not self.mass.config.onboard_done:
+            return web.Response(status=503, text="Setup required")
+
         if not request.can_read_body:
             return web.Response(status=400, text="Body required")
         cmd_data = await request.read()
@@ -647,6 +661,18 @@ class WebserverController(CoreController):
 
     async def _handle_auth_login(self, request: web.Request) -> web.Response:
         """Handle login request."""
+        # Block until onboarding is complete
+        if not self.mass.config.onboard_done:
+            return web.json_response(
+                {"success": False, "error": "Setup required"},
+                status=403,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
         try:
             if not request.can_read_body:
                 return web.Response(status=400, text="Body required")
