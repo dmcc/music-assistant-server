@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from awesomeversion import AwesomeVersion
 from mashumaro import DataClassDictMixin
 from music_assistant_models.enums import EventType
 
@@ -137,7 +138,6 @@ class RemoteAccessManager:
         ha_provider = cast("HomeAssistantProvider | None", self.mass.get_provider("hass"))
         if not ha_provider:
             return False, None
-
         try:
             hass_client = ha_provider.hass
             if not hass_client or not hass_client.connected:
@@ -146,15 +146,23 @@ class RemoteAccessManager:
             result = await hass_client.send_command("cloud/status")
             logged_in = result.get("logged_in", False)
             active_subscription = result.get("active_subscription", False)
-
             if not (logged_in and active_subscription):
                 return False, None
-
-            return True, None
-
-        except Exception:
-            self.logger.exception("Error getting HA Cloud status")
-            return False, None
+            # HA Cloud is available, get ICE servers
+            # The cloud/webrtc/ice_servers command was added in HA 2025.12.0b6
+            if AwesomeVersion(hass_client.version) >= AwesomeVersion("2025.12.0b6"):
+                if ice_servers := await hass_client.send_command("cloud/webrtc/ice_servers"):
+                    return True, ice_servers
+            else:
+                self.logger.debug(
+                    "HA version %s not supported for optimized WebRTC mode "
+                    "(requires 2025.12.0b6 or later)",
+                    hass_client.version,
+                )
+            self.logger.debug("HA Cloud available but no ICE servers returned")
+        except Exception as err:
+            self.logger.exception("Error getting HA Cloud status: %s", err)
+        return False, None
 
     @property
     def is_enabled(self) -> bool:
