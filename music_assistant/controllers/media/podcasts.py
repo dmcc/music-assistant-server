@@ -72,7 +72,7 @@ class PodcastsController(MediaControllerBase[Podcast]):
             limit=limit,
             offset=offset,
             order_by=order_by,
-            provider=provider,
+            provider_filter=self._ensure_provider_filter(provider),
             extra_query_parts=extra_query_parts,
             extra_query_params=extra_query_params,
         )
@@ -87,7 +87,7 @@ class PodcastsController(MediaControllerBase[Podcast]):
                 search=None,
                 limit=limit,
                 order_by=order_by,
-                provider=provider,
+                provider_filter=self._ensure_provider_filter(provider),
                 extra_query_parts=extra_query_parts,
                 extra_query_params=extra_query_params,
             )

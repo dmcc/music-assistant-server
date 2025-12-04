@@ -123,6 +123,9 @@ class PlaylistController(MediaControllerBase[Playlist]):
             raise InvalidDataError(msg)
         # create playlist on the provider
         playlist = await provider.create_playlist(name)
+        for prov_mapping in playlist.provider_mappings:
+            # when manually creating a playlist, it's always in the library
+            prov_mapping.in_library = True
         # add the new playlist to the library
         return await self.add_item_to_library(playlist, False)
 
