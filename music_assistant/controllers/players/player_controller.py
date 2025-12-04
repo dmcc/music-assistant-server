@@ -690,13 +690,11 @@ class PlayerController(CoreController):
         ):
             await self.mass.player_queues.resume(player_id)
 
-    @api_command("players/cmd/volume_set")
-    @handle_player_command
-    async def cmd_volume_set(self, player_id: str, volume_level: int) -> None:
-        """Send VOLUME_SET command to given player.
+    async def _volume_set(self, player_id: str, volume_level: int) -> None:
+        """Set volume without permission checks (internal use only).
 
-        - player_id: player_id of the player to handle the command.
-        - volume_level: volume level (0..100) to set on the player.
+        :param player_id: player_id of the player to handle the command.
+        :param volume_level: volume level (0..100) to set on the player.
         """
         player = self.get(player_id, True)
         assert player is not None  # for type checker
@@ -739,6 +737,16 @@ class PlayerController(CoreController):
         async with self._player_throttlers[player_id]:
             assert player_control.volume_set is not None
             await player_control.volume_set(volume_level)
+
+    @api_command("players/cmd/volume_set")
+    @handle_player_command
+    async def cmd_volume_set(self, player_id: str, volume_level: int) -> None:
+        """Send VOLUME_SET command to given player.
+
+        :param player_id: player_id of the player to handle the command.
+        :param volume_level: volume level (0..100) to set on the player.
+        """
+        await self._volume_set(player_id, volume_level)
 
     @api_command("players/cmd/volume_up")
     @handle_player_command
@@ -1712,7 +1720,8 @@ class PlayerController(CoreController):
             new_child_volume = int(cur_child_volume + volume_dif)
             new_child_volume = max(0, new_child_volume)
             new_child_volume = min(100, new_child_volume)
-            coros.append(self.cmd_volume_set(child_player.player_id, new_child_volume))
+            # Use private method to skip permission check - already validated on group
+            coros.append(self._volume_set(child_player.player_id, new_child_volume))
         await asyncio.gather(*coros)
 
     def get_announcement_volume(self, player_id: str, volume_override: int | None) -> int | None:
