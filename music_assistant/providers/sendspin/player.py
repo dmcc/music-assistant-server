@@ -218,6 +218,7 @@ class SendspinPlayer(Player):
                 (EventType.QUEUE_UPDATED),
             )
         )
+        self._attr_expose_to_ha_by_default = "Music Assistant Web" not in sendspin_client.name
 
     async def event_cb(self, client: SendspinClient, event: ClientEvent) -> None:
         """Event callback registered to the sendspin server."""
