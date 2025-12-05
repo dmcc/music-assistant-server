@@ -1318,7 +1318,11 @@ class ConfigController:
                 continue
             player_provider = player_config["provider"]
             if prov_conf := prov_configs.get(player_provider):
-                if not (prov_manifest := self.mass.get_provider_manifest(prov_conf["domain"])):
+                try:
+                    if not (prov_manifest := self.mass.get_provider_manifest(prov_conf["domain"])):
+                        continue
+                except KeyError:
+                    # removed provider
                     continue
                 if prov_manifest.multi_instance:
                     # multi instance providers use instance_id as lookup key
