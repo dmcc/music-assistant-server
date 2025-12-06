@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING, Any, cast
 import aiohttp
 from aiortc import (
     RTCConfiguration,
-    RTCIceCandidate,
     RTCIceServer,
     RTCPeerConnection,
     RTCSessionDescription,
 )
+from aiortc.sdp import candidate_from_sdp
 from aiosendspin.server import ClientAddedEvent, ClientRemovedEvent, SendspinEvent, SendspinServer
 from music_assistant_models.enums import ProviderFeature
 
@@ -188,8 +188,33 @@ class SendspinProvider(PlayerProvider):
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        # Wait briefly for ICE gathering
-        await asyncio.sleep(0.1)
+        # Wait for ICE gathering to complete before sending the answer
+        # This is required because aiortc doesn't support trickle ICE -
+        # candidates are only embedded in the SDP after gathering is complete
+        # See: https://github.com/aiortc/aiortc/issues/1344
+        gather_timeout = 30  # seconds
+        gather_start = asyncio.get_event_loop().time()
+        while pc.iceGatheringState != "complete":
+            if pc.connectionState in ("closed", "failed"):
+                self.logger.debug(
+                    "Sendspin session %s closed during ICE gathering, aborting",
+                    session_id,
+                )
+                raise RuntimeError("Connection closed during ICE gathering")
+            if asyncio.get_event_loop().time() - gather_start > gather_timeout:
+                self.logger.warning(
+                    "Sendspin session %s ICE gathering timeout after %ds, sending answer anyway",
+                    session_id,
+                    gather_timeout,
+                )
+                break
+            await asyncio.sleep(0.1)
+
+        self.logger.debug(
+            "Sendspin session %s ICE gathering completed in %.1fs",
+            session_id,
+            asyncio.get_event_loop().time() - gather_start,
+        )
 
         return {
             "session_id": session_id,
@@ -223,20 +248,18 @@ class SendspinProvider(PlayerProvider):
             if not candidate_str:
                 return {"success": False}
 
-            # Create RTCIceCandidate from the SDP string
-            ice_candidate = RTCIceCandidate(
-                component=1,
-                foundation="",
-                ip="",
-                port=0,
-                priority=0,
-                protocol="udp",
-                type="host",
-                sdpMid=str(sdp_mid) if sdp_mid else None,
-                sdpMLineIndex=int(sdp_mline_index) if sdp_mline_index is not None else None,
+            # Parse the ICE candidate using aiortc's candidate_from_sdp function
+            # Browser sends "candidate:..." format, candidate_from_sdp expects without prefix
+            if candidate_str.startswith("candidate:"):
+                sdp_candidate_str = candidate_str[len("candidate:") :]
+            else:
+                sdp_candidate_str = candidate_str
+
+            ice_candidate = candidate_from_sdp(sdp_candidate_str)
+            ice_candidate.sdpMid = str(sdp_mid) if sdp_mid else None
+            ice_candidate.sdpMLineIndex = (
+                int(sdp_mline_index) if sdp_mline_index is not None else None
             )
-            # Parse the candidate string to populate the fields
-            ice_candidate.candidate = str(candidate_str)  # type: ignore[attr-defined]
 
             await session.peer_connection.addIceCandidate(ice_candidate)
             return {"success": True}
