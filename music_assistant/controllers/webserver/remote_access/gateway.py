@@ -243,15 +243,23 @@ class WebRTCGateway:
     async def _register(self) -> None:
         """Register with the signaling server."""
         if self._signaling_ws:
+            # Prepare ICE servers for the signaling server to relay to clients
+            # Mask credentials in logs for security
+            ice_servers_for_log = [
+                {k: v if k != "credential" else "***" for k, v in s.items()}
+                for s in self.ice_servers
+            ]
             registration_msg = {
                 "type": "register-server",
                 "remoteId": self.remote_id,
+                "iceServers": self.ice_servers,
             }
             self.logger.debug(
-                "Sending registration to signaling server with Remote ID: %s",
+                "Sending registration with Remote ID: %s and %d ICE servers: %s",
                 self.remote_id,
+                len(self.ice_servers),
+                ice_servers_for_log,
             )
-            self.logger.debug("Registration message: %s", registration_msg)
             await self._signaling_ws.send_json(registration_msg)
             self.logger.debug("Registration message sent successfully")
         else:
@@ -302,6 +310,15 @@ class WebRTCGateway:
 
         :param session_id: The session ID.
         """
+        self.logger.debug(
+            "Creating session %s with %d ICE servers: %s",
+            session_id,
+            len(self.ice_servers),
+            [
+                {k: v if k != "credential" else "***" for k, v in s.items()}
+                for s in self.ice_servers
+            ],
+        )
         config = RTCConfiguration(
             iceServers=[RTCIceServer(**server) for server in self.ice_servers]
         )
@@ -399,6 +416,16 @@ class WebRTCGateway:
                     session_id,
                 )
                 return
+
+            # Debug: Log ICE candidates in the answer SDP
+            sdp_lines = pc.localDescription.sdp.split("\n")
+            ice_candidates = [line for line in sdp_lines if line.startswith("a=candidate:")]
+            self.logger.debug(
+                "Session %s answer SDP contains %d ICE candidates: %s",
+                session_id,
+                len(ice_candidates),
+                ice_candidates,
+            )
 
             if self._signaling_ws:
                 await self._signaling_ws.send_json(
