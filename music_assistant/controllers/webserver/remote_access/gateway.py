@@ -48,7 +48,7 @@ class WebRTCSession:
 
     session_id: str
     peer_connection: RTCPeerConnection
-    data_channel: Any = None
+    data_channel: Any = None  # Main API channel (ma-api)
     local_ws: Any = None
     message_queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     forward_to_local_task: asyncio.Task[None] | None = None
@@ -190,10 +190,10 @@ class WebRTCGateway:
             await asyncio.sleep(0.5)
             self.logger.debug("Sending registration")
             await self._register()
-            self._is_connected = True
+            # Note: _is_connected is set to True when we receive "registered" confirmation
             # Reset reconnect delay on successful connection
             self._current_reconnect_delay = self._reconnect_delay
-            self.logger.info("Connected and registered with signaling server")
+            self.logger.info("Registration sent, waiting for confirmation...")
 
             # Message loop
             self.logger.debug("Entering message loop")
@@ -273,12 +273,11 @@ class WebRTCGateway:
             # Server responded to our ping, connection is alive
             pass
         elif msg_type == "registered":
+            self._is_connected = True
             self.logger.info("Registered with signaling server as: %s", message.get("remoteId"))
         elif msg_type == "error":
-            self.logger.error(
-                "Signaling server error: %s",
-                message.get("message", "Unknown error"),
-            )
+            error_msg = message.get("error") or message.get("message", "Unknown error")
+            self.logger.error("Signaling server error: %s", error_msg)
         elif msg_type == "client-connected":
             session_id = message.get("sessionId")
             if session_id:
@@ -312,6 +311,10 @@ class WebRTCGateway:
 
         @pc.on("datachannel")
         def on_datachannel(channel: Any) -> None:
+            # Main API channel (ma-api)
+            self.logger.debug(
+                "Received API DataChannel '%s' for session %s", channel.label, session_id
+            )
             session.data_channel = channel
             asyncio.create_task(self._setup_data_channel(session))
 

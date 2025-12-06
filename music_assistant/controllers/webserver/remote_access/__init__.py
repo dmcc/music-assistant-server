@@ -168,6 +168,28 @@ class RemoteAccessManager:
             self.logger.exception("Error getting HA Cloud status: %s", err)
         return False, None
 
+    async def get_ice_servers(self) -> list[dict[str, str]]:
+        """Get ICE servers for WebRTC connections.
+
+        Returns HA Cloud TURN servers if available, otherwise returns public STUN servers.
+        This method can be called regardless of whether remote access is enabled.
+
+        :return: List of ICE server configurations.
+        """
+        # Default public STUN servers
+        default_ice_servers: list[dict[str, str]] = [
+            {"urls": "stun:stun.l.google.com:19302"},
+            {"urls": "stun:stun.cloudflare.com:3478"},
+            {"urls": "stun:stun.home-assistant.io:3478"},
+        ]
+
+        # Try to get HA Cloud ICE servers
+        _, ice_servers = await self._get_ha_cloud_status()
+        if ice_servers:
+            return ice_servers
+
+        return default_ice_servers
+
     @property
     def is_enabled(self) -> bool:
         """Return whether WebRTC remote access is enabled."""
