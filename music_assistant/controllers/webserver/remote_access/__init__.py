@@ -107,6 +107,9 @@ class RemoteAccessManager:
             local_ws_url=local_ws_url,
             remote_id=self._remote_id,
             ice_servers=ice_servers,
+            # Pass callback to get fresh ICE servers for each client connection
+            # This ensures TURN credentials are always valid
+            ice_servers_callback=self.get_ice_servers if ha_cloud_available else None,
         )
 
         await self.gateway.start()
