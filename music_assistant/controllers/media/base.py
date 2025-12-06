@@ -929,4 +929,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
             else:
                 # No explicit filter - use user's provider filter
                 final_provider_filter = user_provider_filter
+        elif provider is not None:
+            # No user filter - use the provided filter as is
+            final_provider_filter = [provider] if isinstance(provider, str) else provider
         return final_provider_filter
