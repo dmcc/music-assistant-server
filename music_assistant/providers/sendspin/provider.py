@@ -10,7 +10,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import aiohttp
-from aiortc import RTCConfiguration, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    RTCConfiguration,
+    RTCIceCandidate,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
 from aiosendspin.server import ClientAddedEvent, ClientRemovedEvent, SendspinEvent, SendspinServer
 from music_assistant_models.enums import ProviderFeature
 
@@ -128,8 +134,15 @@ class SendspinProvider(PlayerProvider):
         session_id = secrets.token_urlsafe(16)
         self.logger.debug("Creating Sendspin WebRTC session %s", session_id)
 
-        # Create peer connection with STUN servers
-        config = RTCConfiguration(iceServers=[])
+        # Get ICE servers (may include HA Cloud TURN servers)
+        ice_servers = await self.mass.webserver.remote_access.get_ice_servers()
+        self.logger.debug(
+            "Creating Sendspin WebRTC session with %d ICE servers",
+            len(ice_servers),
+        )
+
+        # Create peer connection with ICE servers
+        config = RTCConfiguration(iceServers=[RTCIceServer(**server) for server in ice_servers])
         pc = RTCPeerConnection(configuration=config)
 
         session = SendspinWebRTCSession(
