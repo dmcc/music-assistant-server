@@ -93,7 +93,7 @@ class RemoteAccessManager:
         self.logger.debug("Scheduling remote access gateway start in %s seconds", STARTUP_DELAY)
         self.mass.call_later(
             STARTUP_DELAY,
-            self._start_gateway(),
+            self._start_gateway,
             task_id=TASK_ID_START_GATEWAY,
         )
 
