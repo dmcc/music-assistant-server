@@ -10,16 +10,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import aiohttp
-from aiortc import (
-    RTCConfiguration,
-    RTCIceServer,
-    RTCPeerConnection,
-    RTCSessionDescription,
-)
+from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
 from aiortc.sdp import candidate_from_sdp
 from aiosendspin.server import ClientAddedEvent, ClientRemovedEvent, SendspinEvent, SendspinServer
 from music_assistant_models.enums import ProviderFeature
 
+from music_assistant.controllers.webserver.helpers.auth_middleware import get_current_user
 from music_assistant.mass import MusicAssistant
 from music_assistant.models.player_provider import PlayerProvider
 from music_assistant.providers.sendspin.player import SendspinPlayer
@@ -62,6 +58,9 @@ class SendspinProvider(PlayerProvider):
             # WebRTC signaling commands for Sendspin connections
             # this is used to establish WebRTC DataChannels with Sendspin clients
             # for example the WebPlayer in the Music Assistant frontend or supported (mobile) apps
+            self.mass.register_api_command(
+                "sendspin/connection_info", self.handle_get_connection_info
+            ),
             self.mass.register_api_command("sendspin/connect", self.handle_webrtc_connect),
             self.mass.register_api_command("sendspin/ice", self.handle_webrtc_ice),
             self.mass.register_api_command("sendspin/disconnect", self.handle_webrtc_disconnect),
@@ -223,6 +222,9 @@ class SendspinProvider(PlayerProvider):
                 "type": pc.localDescription.type,
             },
             "ice_candidates": ice_candidates,
+            # Include local WebSocket URL for direct connection attempts
+            # Frontend can try this first before falling back to WebRTC
+            "local_ws_url": f"ws://{self.mass.streams.publish_ip}:8927/sendspin",
         }
 
     async def handle_webrtc_ice(
@@ -286,6 +288,38 @@ class SendspinProvider(PlayerProvider):
         :return: List of ICE server configurations.
         """
         return await self.mass.webserver.remote_access.get_ice_servers()
+
+    async def handle_get_connection_info(self, client_id: str | None = None) -> dict[str, Any]:
+        """
+        Get connection info for Sendspin.
+
+        Returns the local WebSocket URL for direct connection attempts,
+        and ICE servers for WebRTC fallback.
+
+        The frontend should try the local WebSocket URL first for lower latency,
+        and fall back to WebRTC if the direct connection fails.
+
+        :param client_id: Optional Sendspin client ID for auto-whitelisting.
+        :return: Dictionary with local_ws_url and ice_servers.
+        """
+        # Auto-whitelist the player for users with player filters enabled
+        # This allows users with restricted player access to still use the web player
+        if client_id and (user := get_current_user()):
+            if user.player_filter and client_id not in user.player_filter:
+                self.logger.debug(
+                    "Auto-whitelisting Sendspin player %s for user %s",
+                    client_id,
+                    user.username,
+                )
+                new_filter = [*user.player_filter, client_id]
+                await self.mass.webserver.auth.update_user_filters(
+                    user, player_filter=new_filter, provider_filter=None
+                )
+
+        return {
+            "local_ws_url": f"ws://{self.mass.streams.publish_ip}:8927/sendspin",
+            "ice_servers": await self.mass.webserver.remote_access.get_ice_servers(),
+        }
 
     async def _close_webrtc_session(self, session_id: str) -> None:
         """Close a WebRTC session and clean up resources."""

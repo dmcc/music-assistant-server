@@ -112,6 +112,7 @@ class WebRTCGateway:
         self._current_reconnect_delay = 5
         self._run_task: asyncio.Task[None] | None = None
         self._is_connected = False
+        self._connecting = False
 
     @property
     def is_running(self) -> bool:
@@ -204,21 +205,19 @@ class WebRTCGateway:
 
     async def _connect_to_signaling(self) -> None:
         """Connect to the signaling server."""
+        if self._connecting:
+            self.logger.warning("Already connecting to signaling server, skipping")
+            return
+        self._connecting = True
         self.logger.info("Connecting to signaling server: %s", self.signaling_url)
         try:
             self._signaling_ws = await self.http_session.ws_connect(
                 self.signaling_url,
-                heartbeat=30,  # Send WebSocket ping every 30 seconds
-                autoping=True,  # Automatically respond to pings
+                heartbeat=None,
             )
-            self.logger.debug("WebSocket connection established")
-            # Small delay to let any previous connection fully close on the server side
-            # This helps prevent race conditions during reconnection
-            await asyncio.sleep(0.5)
+            self.logger.debug("WebSocket connection established, id=%s", id(self._signaling_ws))
             self.logger.debug("Sending registration")
             await self._register()
-            # Note: _is_connected is set to True when we receive "registered" confirmation
-            # Reset reconnect delay on successful connection
             self._current_reconnect_delay = self._reconnect_delay
             self.logger.info("Registration sent, waiting for confirmation...")
 
@@ -254,8 +253,12 @@ class WebRTCGateway:
                 else:
                     self.logger.warning("Unexpected WebSocket message type: %s", msg.type)
 
+            ws_exception = self._signaling_ws.exception()
             self.logger.info(
-                "Message loop exited - WebSocket closed: %s", self._signaling_ws.closed
+                "Message loop exited - WebSocket closed: %s, close_code: %s, exception: %s",
+                self._signaling_ws.closed,
+                self._signaling_ws.close_code,
+                ws_exception,
             )
         except TimeoutError:
             self.logger.error("Timeout connecting to signaling server")
@@ -265,6 +268,7 @@ class WebRTCGateway:
             self.logger.exception("Unexpected error in signaling connection")
         finally:
             self._is_connected = False
+            self._connecting = False
             self._signaling_ws = None
 
     async def _register(self) -> None:
