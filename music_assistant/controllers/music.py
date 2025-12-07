@@ -97,6 +97,7 @@ CONF_DELETED_PROVIDERS = "deleted_providers"
 DB_SCHEMA_VERSION: Final[int] = 22
 
 CACHE_CATEGORY_LAST_SYNC: Final[int] = 9
+CACHE_CATEGORY_SEARCH_RESULTS: Final[int] = 10
 
 
 class MusicController(CoreController):
@@ -247,6 +248,14 @@ class MusicController(CoreController):
         :param media_types: A list of media_types to include.
         :param limit: number of items to return in the search (per type).
         """
+        # use a (short-lived) cache to avoid repeated searches
+        cache_key = f"{search_query}{'-'.join(sorted([mt.value for mt in media_types]))}-{limit}-{library_only}"  # noqa: E501
+        if user := get_current_user():
+            cache_key += user.user_id
+        if cache := await self.mass.cache.get(
+            key=cache_key, provider=self.domain, category=CACHE_CATEGORY_SEARCH_RESULTS
+        ):
+            return cache
         if not media_types:
             media_types = MediaType.ALL
         # Check if the search query is a streaming provider public shareable URL
@@ -260,6 +269,7 @@ class MusicController(CoreController):
             self.logger.warning("%s", str(err))
             return SearchResults()
         else:
+            # handle special case of direct shareable url search
             if provider_instance_id_or_domain in PROVIDERS_WITH_SHAREABLE_URLS:
                 try:
                     item = await self.get_item(
@@ -285,67 +295,87 @@ class MusicController(CoreController):
                         return SearchResults(podcasts=[item])
                     else:
                         return SearchResults()
-
-        # include results from library +  all (unique) music providers
-        search_providers = [] if library_only else self.get_unique_providers()
-        results_per_provider: list[SearchResults] = await asyncio.gather(
-            self.search_library(search_query, media_types, limit=limit),
-            *[
-                self.search_provider(
-                    search_query,
-                    provider_instance,
-                    media_types,
-                    limit=limit,
+        # handle normal global search by querying all providers
+        results_per_provider: list[SearchResults] = []
+        # always first search the library
+        library_results = await self.search_library(search_query, media_types, limit=limit)
+        results_per_provider.append(library_results)
+        if not library_only:
+            # create a set of all provider item ids already in library
+            # this way we can avoid returning duplicates in the search results
+            all_prov_item_ids = {
+                (item.media_type, prov_mapping.provider_domain, prov_mapping.item_id)
+                for result in (
+                    library_results.artists,
+                    library_results.albums,
+                    library_results.tracks,
+                    library_results.playlists,
+                    library_results.audiobooks,
+                    library_results.podcasts,
                 )
-                for provider_instance in search_providers
-            ],
-        )
-        # return result from all providers while keeping index
-        # so the result is sorted as each provider delivered
-        result = SearchResults(
-            artists=[
-                item
-                for sublist in zip_longest(*[x.artists for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-            albums=[
-                item
-                for sublist in zip_longest(*[x.albums for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-            tracks=[
-                item
-                for sublist in zip_longest(*[x.tracks for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-            playlists=[
-                item
-                for sublist in zip_longest(*[x.playlists for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-            radio=[
-                item
-                for sublist in zip_longest(*[x.radio for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-            audiobooks=[
-                item
-                for sublist in zip_longest(*[x.audiobooks for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-            podcasts=[
-                item
-                for sublist in zip_longest(*[x.podcasts for x in results_per_provider])
-                for item in sublist
-                if item is not None
-            ][:limit],
-        )
+                for item in result
+                for prov_mapping in item.provider_mappings
+            }
+            # include results from library + all (unique) music providers
+            search_providers = self.get_unique_providers()
+            results_per_provider += await asyncio.gather(
+                *[
+                    self._search_provider(
+                        search_query,
+                        provider_instance,
+                        media_types,
+                        limit=limit,
+                        skip_item_ids=all_prov_item_ids,
+                    )
+                    for provider_instance in search_providers
+                ],
+            )
+            # return result from all providers while keeping index
+            # so the result is sorted as each provider delivered
+            result = SearchResults(
+                artists=[
+                    item
+                    for sublist in zip_longest(*[x.artists for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+                albums=[
+                    item
+                    for sublist in zip_longest(*[x.albums for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+                tracks=[
+                    item
+                    for sublist in zip_longest(*[x.tracks for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+                playlists=[
+                    item
+                    for sublist in zip_longest(*[x.playlists for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+                radio=[
+                    item
+                    for sublist in zip_longest(*[x.radio for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+                audiobooks=[
+                    item
+                    for sublist in zip_longest(*[x.audiobooks for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+                podcasts=[
+                    item
+                    for sublist in zip_longest(*[x.podcasts for x in results_per_provider])
+                    for item in sublist
+                    if item is not None
+                ][:limit],
+            )
 
         # the search results should already be sorted by relevance
         # but we apply one extra round of sorting and that is to put exact name
@@ -357,14 +387,22 @@ class MusicController(CoreController):
         result.radio = self._sort_search_result(search_query, result.radio)
         result.audiobooks = self._sort_search_result(search_query, result.audiobooks)
         result.podcasts = self._sort_search_result(search_query, result.podcasts)
+        await self.mass.cache.set(
+            key=cache_key,
+            data=result,
+            expiration=300,
+            provider=self.domain,
+            category=CACHE_CATEGORY_SEARCH_RESULTS,
+        )
         return result
 
-    async def search_provider(
+    async def _search_provider(
         self,
         search_query: str,
         provider_instance_id_or_domain: str,
         media_types: list[MediaType],
         limit: int = 10,
+        skip_item_ids: set[tuple[MediaType, str, str]] | None = None,
     ) -> SearchResults:
         """Perform search on given provider.
 
@@ -382,11 +420,44 @@ class MusicController(CoreController):
 
         # create safe search string
         search_query = search_query.replace("/", " ").replace("'", "")
-        return await prov.search(
+        prov_search_results = await prov.search(
             search_query,
             media_types,
             limit,
         )
+        if skip_item_ids:
+            # filter out items already in skip_item_ids
+            prov_search_results.artists = [
+                item
+                for item in prov_search_results.artists
+                if (item.media_type, prov.domain, item.item_id) not in skip_item_ids
+            ]
+            prov_search_results.albums = [
+                item
+                for item in prov_search_results.albums
+                if (item.media_type, prov.domain, item.item_id) not in skip_item_ids
+            ]
+            prov_search_results.tracks = [
+                item
+                for item in prov_search_results.tracks
+                if (item.media_type, prov.domain, item.item_id) not in skip_item_ids
+            ]
+            prov_search_results.playlists = [
+                item
+                for item in prov_search_results.playlists
+                if (item.media_type, prov.domain, item.item_id) not in skip_item_ids
+            ]
+            prov_search_results.audiobooks = [
+                item
+                for item in prov_search_results.audiobooks
+                if (item.media_type, prov.domain, item.item_id) not in skip_item_ids
+            ]
+            prov_search_results.podcasts = [
+                item
+                for item in prov_search_results.podcasts
+                if (item.media_type, prov.domain, item.item_id) not in skip_item_ids
+            ]
+        return prov_search_results
 
     async def search_library(
         self,
