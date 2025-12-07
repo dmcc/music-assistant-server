@@ -1311,25 +1311,21 @@ class ConfigController:
                 values[CONF_SMART_FADES_MODE] = "smart_crossfade"
                 changed = True
 
-        # migrate player configs: always use lookup key for provider
-        prov_configs = self._data.get(CONF_PROVIDERS, {})
+        # migrate player configs: always use instance_id for provider
         for player_config in self._data.get(CONF_PLAYERS, {}).values():
             if "provider" not in player_config:
                 continue
             player_provider = player_config["provider"]
-            if prov_conf := prov_configs.get(player_provider):
-                try:
-                    if not (prov_manifest := self.mass.get_provider_manifest(prov_conf["domain"])):
-                        continue
-                except KeyError:
-                    # removed provider
+            try:
+                if not (prov := self.mass.get_provider(player_provider)):
                     continue
-                if prov_manifest.multi_instance:
-                    # multi instance providers use instance_id as lookup key
-                    continue
-                # single instance providers use domain as lookup key
-                player_config["provider"] = prov_conf["domain"]
-                changed = True
+            except KeyError:
+                # removed provider
+                continue
+            if player_config["provider"] == prov.instance_id:
+                continue
+            player_config["provider"] = prov.instance_id
+            changed = True
 
         if changed:
             await self._async_save()
