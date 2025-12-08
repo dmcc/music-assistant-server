@@ -92,7 +92,7 @@ class WebsocketClientHandler:
         await self._send_message(server_info)
 
         # Block until onboarding is complete
-        if not self.mass.config.onboard_done:
+        if not self.mass.config.onboard_done and not self._is_ingress:
             await self._send_message(ErrorResultMessage("connection", 503, "Setup required"))
             await wsock.close()
             return wsock

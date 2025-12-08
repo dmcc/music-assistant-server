@@ -289,21 +289,19 @@ class WebserverController(CoreController):
                 "\n"
                 "    %s/setup\n"
                 "\n"
-                "Webserver running on: %s:%s\n"
+                "################################################################################\n",
+                base_url,
+            )
+        else:
+            self.logger.info(
+                "################################################################################\n"
+                "\n"
+                "Webserver available on: %s\n"
                 "\n"
                 "If this address is incorrect, see the documentation on how to configure\n"
                 "the Webserver in Settings --> Core modules --> Webserver\n"
                 "\n"
                 "################################################################################\n",
-                base_url,
-                bind_ip,
-                self.publish_port,
-            )
-        else:
-            self.logger.info(
-                "Starting webserver on  %s:%s - base url: %s\n#\n",
-                bind_ip,
-                self.publish_port,
                 base_url,
             )
 
@@ -371,7 +369,7 @@ class WebserverController(CoreController):
             ssl_context=ssl_context,
         )
         if self.mass.running_as_hass_addon:
-            # announce to HA supervisor
+            # (re)announce to HA supervisor to make sure that HA picks it up
             await self._announce_to_homeassistant()
 
         # Setup remote access after webserver is running
@@ -953,7 +951,7 @@ class WebserverController(CoreController):
         # Allow setup if either:
         # 1. No users exist yet (fresh install)
         # 2. Users exist but onboarding not done (e.g., Ingress auto-created user)
-        if await self.auth.has_users() and self.mass.config.get(CONF_ONBOARD_DONE):
+        if await self.auth.has_users() and self.mass.config.onboard_done:
             # Setup already completed, redirect to login
             return web.Response(status=302, headers={"Location": "/login"})
 
@@ -987,7 +985,7 @@ class WebserverController(CoreController):
     async def _handle_setup(self, request: web.Request) -> web.Response:
         """Handle first-time setup request to create admin user."""
         # Check if setup is still needed (allow if onboard_done is false)
-        if await self.auth.has_users() and self.mass.config.get(CONF_ONBOARD_DONE):
+        if await self.auth.has_users() and self.mass.config.onboard_done:
             return web.json_response(
                 {"success": False, "error": "Setup already completed"}, status=400
             )
@@ -1172,18 +1170,10 @@ class WebserverController(CoreController):
 
     async def _announce_to_homeassistant(self) -> None:
         """Announce Music Assistant Ingress server to Home Assistant via Supervisor API."""
-        # Only announce if server is onboarded to prevent race condition
-        # where HA integration ignores servers that are not yet onboarded
-        if not self.mass.config.onboard_done:
-            self.logger.debug("Skipping HA announcement - server not yet onboarded")
-            return
-
         supervisor_token = os.environ["SUPERVISOR_TOKEN"]
         addon_hostname = os.environ["HOSTNAME"]
-
         # Get or create auth token for the HA system user
         ha_integration_token = await self.auth.get_homeassistant_system_user_token()
-
         discovery_payload = {
             "service": "music_assistant",
             "config": {
@@ -1192,7 +1182,6 @@ class WebserverController(CoreController):
                 "auth_token": ha_integration_token,
             },
         }
-
         try:
             async with self.mass.http_session_no_ssl.post(
                 "http://supervisor/discovery",
