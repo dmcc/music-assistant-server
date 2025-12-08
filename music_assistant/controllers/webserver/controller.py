@@ -999,76 +999,60 @@ class WebserverController(CoreController):
         from_ingress = body.get("from_ingress", False)
         display_name = body.get("display_name")
 
+        # Check if this is a valid ingress request (from_ingress flag + actual ingress headers)
+        is_valid_ingress = from_ingress and is_request_from_ingress(request)
+
         # Validation
         if not username or len(username) < 2:
             return web.json_response(
                 {"success": False, "error": "Username must be at least 2 characters"}, status=400
             )
 
-        if not password or len(password) < 8:
+        # Password is only required for non-ingress users
+        if not is_valid_ingress and (not password or len(password) < 8):
             return web.json_response(
                 {"success": False, "error": "Password must be at least 8 characters"}, status=400
             )
 
         try:
-            # Get built-in provider
-            builtin_provider = self.auth.login_providers.get("builtin")
-            if not builtin_provider:
-                return web.json_response(
-                    {"success": False, "error": "Built-in auth provider not available"}, status=500
-                )
-
-            if not isinstance(builtin_provider, BuiltinLoginProvider):
-                return web.json_response(
-                    {"success": False, "error": "Built-in provider configuration error"}, status=500
-                )
-
-            # Check if this is an Ingress setup where user already exists
-            user = None
-            if from_ingress and is_request_from_ingress(request):
+            if is_valid_ingress:
+                # Ingress setup: Create user with HA provider link only (no password required)
                 ha_user_id = request.headers.get("X-Remote-User-ID")
-                if ha_user_id:
-                    # Try to find existing auto-created Ingress user
-                    user = await self.auth.get_user_by_provider_link(
-                        AuthProviderType.HOME_ASSISTANT, ha_user_id
-                    )
-            if user:
-                # User already exists (auto-created from Ingress), update and add password
-                updates = {}
-                if display_name and not user.display_name:
-                    updates["display_name"] = display_name
-                    user.display_name = display_name
-
-                # Make user admin if not already
-                if user.role != UserRole.ADMIN:
-                    updates["role"] = UserRole.ADMIN.value
-                    user.role = UserRole.ADMIN
-
-                # Apply updates if any
-                if updates:
-                    await self.auth.database.update(
-                        "users",
-                        {"user_id": user.user_id},
-                        updates,
+                if not ha_user_id:
+                    return web.json_response(
+                        {"success": False, "error": "Missing Home Assistant user ID"}, status=400
                     )
 
-                # Add password authentication to existing user
-                password_hash = builtin_provider._hash_password(password, user.user_id)
-                await self.auth.link_user_to_provider(user, AuthProviderType.BUILTIN, password_hash)
+                # Create admin user without password
+                user = await self.auth.create_user(
+                    username=username,
+                    role=UserRole.ADMIN,
+                    display_name=display_name,
+                )
+
+                # Link to Home Assistant provider
+                await self.auth.link_user_to_provider(
+                    user, AuthProviderType.HOME_ASSISTANT, ha_user_id
+                )
             else:
-                # Create new admin user with password
+                # Non-ingress setup: Create user with password
+                builtin_provider = self.auth.login_providers.get("builtin")
+                if not builtin_provider:
+                    return web.json_response(
+                        {"success": False, "error": "Built-in auth provider not available"},
+                        status=500,
+                    )
+
+                if not isinstance(builtin_provider, BuiltinLoginProvider):
+                    return web.json_response(
+                        {"success": False, "error": "Built-in provider configuration error"},
+                        status=500,
+                    )
+
+                # Create admin user with password
                 user = await builtin_provider.create_user_with_password(
                     username, password, role=UserRole.ADMIN, display_name=display_name
                 )
-
-                # If from Ingress, also link to HA provider
-                if from_ingress and is_request_from_ingress(request):
-                    ha_user_id = request.headers.get("X-Remote-User-ID")
-                    if ha_user_id:
-                        # Link user to Home Assistant provider
-                        await self.auth.link_user_to_provider(
-                            user, AuthProviderType.HOME_ASSISTANT, ha_user_id
-                        )
 
             # Create token for the new admin
             device_name = body.get(
