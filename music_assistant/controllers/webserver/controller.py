@@ -27,7 +27,7 @@ from aiohttp import ClientTimeout, web
 from mashumaro.exceptions import MissingField
 from music_assistant_frontend import where as locate_frontend
 from music_assistant_models.api import CommandMessage
-from music_assistant_models.auth import AuthProviderType, User, UserRole
+from music_assistant_models.auth import AuthProviderType, UserRole
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
 from music_assistant_models.enums import ConfigEntryType
 
@@ -469,7 +469,6 @@ class WebserverController(CoreController):
         # Block until onboarding is complete
         if not self.mass.config.onboard_done:
             return web.Response(status=503, text="Setup required")
-
         if not request.can_read_body:
             return web.Response(status=400, text="Body required")
         cmd_data = await request.read()
@@ -500,33 +499,22 @@ class WebserverController(CoreController):
 
         # Check authentication if required
         if handler.authenticated or handler.required_role:
-            if is_request_from_ingress(request):
-                # Ingress authentication (Home Assistant)
-                user = await self._get_ingress_user(request)
-                if not user:
-                    # This should not happen - ingress requests should have user headers
-                    return web.Response(
-                        status=401,
-                        text="Ingress authentication failed - missing user information",
-                    )
-            else:
-                # Regular authentication (non-ingress)
-                try:
-                    user = await get_authenticated_user(request)
-                except Exception as e:
-                    self.logger.exception("Authentication error: %s", e)
-                    return web.Response(
-                        status=401,
-                        text="Authentication failed",
-                        headers={"WWW-Authenticate": 'Bearer realm="Music Assistant"'},
-                    )
+            try:
+                user = await get_authenticated_user(request)
+            except Exception as e:
+                self.logger.exception("Authentication error: %s", e)
+                return web.Response(
+                    status=401,
+                    text="Authentication failed",
+                    headers={"WWW-Authenticate": 'Bearer realm="Music Assistant"'},
+                )
 
-                if not user:
-                    return web.Response(
-                        status=401,
-                        text="Authentication required",
-                        headers={"WWW-Authenticate": 'Bearer realm="Music Assistant"'},
-                    )
+            if not user:
+                return web.Response(
+                    status=401,
+                    text="Authentication required",
+                    headers={"WWW-Authenticate": 'Bearer realm="Music Assistant"'},
+                )
 
             # Set user in context and check role
             set_current_user(user)
@@ -615,7 +603,7 @@ class WebserverController(CoreController):
     async def _handle_index(self, request: web.Request) -> web.StreamResponse:
         """Handle request for index page with onboarding check."""
         # If not yet onboarded, redirect to setup
-        if not self.mass.config.onboard_done or not await self.auth.has_users():
+        if not self.mass.config.onboard_done:
             # Preserve return_url parameter if present (will be passed back after setup)
             return_url = request.query.get("return_url")
             if return_url:
@@ -632,7 +620,7 @@ class WebserverController(CoreController):
     async def _handle_login_page(self, request: web.Request) -> web.Response:
         """Handle request for login page (external client OAuth callback scenario)."""
         # If not yet onboarded, redirect to setup
-        if not self.mass.config.onboard_done or not await self.auth.has_users():
+        if not self.mass.config.onboard_done:
             return_url = request.query.get("return_url", "")
             device_name = request.query.get("device_name", "")
             setup_url = (
@@ -947,21 +935,18 @@ class WebserverController(CoreController):
 
     async def _handle_setup_page(self, request: web.Request) -> web.Response:
         """Handle request for first-time setup page."""
-        # Check if setup is needed
-        # Allow setup if either:
-        # 1. No users exist yet (fresh install)
-        # 2. Users exist but onboarding not done (e.g., Ingress auto-created user)
-        if await self.auth.has_users() and self.mass.config.onboard_done:
-            # Setup already completed, redirect to login
-            return web.Response(status=302, headers={"Location": "/login"})
-
         # Validate return_url if provided
         return_url = request.query.get("return_url")
         if return_url:
             is_valid, _ = is_allowed_redirect_url(return_url, request, self.base_url)
             if not is_valid:
                 return web.Response(status=400, text="Invalid return_url")
-
+        else:
+            return_url = "/login"
+        # check if setup is already completed
+        if self.mass.config.onboard_done:
+            # Setup already completed, redirect to login (or provided return_url)
+            return web.Response(status=302, headers={"Location": return_url})
         # Serve setup page
         setup_html_path = str(RESOURCES_DIR.joinpath("setup.html"))
         async with aiofiles.open(setup_html_path) as f:
@@ -984,8 +969,7 @@ class WebserverController(CoreController):
 
     async def _handle_setup(self, request: web.Request) -> web.Response:
         """Handle first-time setup request to create admin user."""
-        # Check if setup is still needed (allow if onboard_done is false)
-        if await self.auth.has_users() and self.mass.config.onboard_done:
+        if self.mass.config.onboard_done:
             return web.json_response(
                 {"success": False, "error": "Setup already completed"}, status=400
             )
@@ -1107,50 +1091,6 @@ class WebserverController(CoreController):
             self.logger.info("Migrated existing playlog entries to first user: %s", user_id)
         except Exception as err:
             self.logger.warning("Failed to migrate playlog entries: %s", err)
-
-    async def _get_ingress_user(self, request: web.Request) -> User | None:
-        """
-        Get or create user for ingress (Home Assistant) requests.
-
-        Extracts user information from Home Assistant ingress headers and either
-        finds the existing linked user or creates a new one.
-
-        :param request: The web request with HA ingress headers.
-        :return: User object or None if headers are missing.
-        """
-        ingress_user_id = request.headers.get("X-Remote-User-ID")
-        ingress_username = request.headers.get("X-Remote-User-Name")
-        ingress_display_name = request.headers.get("X-Remote-User-Display-Name")
-
-        if not ingress_user_id or not ingress_username:
-            # No user headers available
-            return None
-
-        # Try to find existing user linked to this HA user ID
-        user = await self.auth.get_user_by_provider_link(
-            AuthProviderType.HOME_ASSISTANT, ingress_user_id
-        )
-
-        if not user:
-            # Security: Ensure at least one user exists (setup should have been completed)
-            if not await self.auth.has_users():
-                self.logger.warning("Ingress request attempted before setup completed")
-                return None
-
-            # Auto-create user for Ingress (they're already authenticated by HA)
-            # Always create with USER role (admin is created during setup)
-            user = await self.auth.create_user(
-                username=ingress_username,
-                role=UserRole.USER,
-                display_name=ingress_display_name,
-            )
-            # Link to Home Assistant provider
-            await self.auth.link_user_to_provider(
-                user, AuthProviderType.HOME_ASSISTANT, ingress_user_id
-            )
-            self.logger.info("Auto-created ingress user: %s", ingress_username)
-
-        return user
 
     async def _announce_to_homeassistant(self) -> None:
         """Announce Music Assistant Ingress server to Home Assistant via Supervisor API."""

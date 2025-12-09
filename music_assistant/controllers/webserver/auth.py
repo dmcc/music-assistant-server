@@ -95,8 +95,11 @@ class AuthenticationManager:
         await self._setup_login_providers(allow_self_registration)
 
         # Migration: Reset onboard_done if no users exist
-        # This handles existing setups where authentication was optional
-        if self.mass.config.onboard_done and not await self.has_users():
+        # This handles migration from existing setups (pre schema 28)
+        # where authentication was still optional - or if the auth db was reset.
+        # note that we do not do this if running as HA addon, because Ingress
+        # users are created automatically
+        if not self.mass.running_as_hass_addon and not await self.has_users():
             self.logger.warning(
                 "Authentication is mandatory but no users exist. "
                 "Resetting onboard_done to redirect to setup."
