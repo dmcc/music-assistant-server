@@ -603,7 +603,9 @@ class WebserverController(CoreController):
     async def _handle_index(self, request: web.Request) -> web.StreamResponse:
         """Handle request for index page with onboarding check."""
         # If not yet onboarded, redirect to setup
-        if not self.mass.config.onboard_done:
+        if not self.mass.config.onboard_done or (
+            not self.auth.has_users() and not is_request_from_ingress(request)
+        ):
             # Preserve return_url parameter if present (will be passed back after setup)
             return_url = request.query.get("return_url")
             if return_url:
