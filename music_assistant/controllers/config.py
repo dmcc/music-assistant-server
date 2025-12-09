@@ -910,7 +910,7 @@ class ConfigController:
         )
         default_config.validate()
         conf_key = f"{CONF_PROVIDERS}/{default_config.instance_id}"
-        self.set(conf_key, default_config.to_raw())
+        self.set_default(conf_key, default_config.to_raw())
 
     @api_command("config/core", required_role="admin")
     async def get_core_configs(self, include_values: bool = False) -> list[CoreConfig]:
