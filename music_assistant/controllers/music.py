@@ -844,7 +844,7 @@ class MusicController(CoreController):
         # add (or overwrite) to library
         ctrl = self.get_controller(full_item.media_type)
         library_item = await ctrl.add_item_to_library(full_item, overwrite_existing)
-        # perform full metadata scan (and provider match)
+        # perform full metadata scan
         await self.mass.metadata.update_metadata(library_item, overwrite_existing)
         return library_item
 
@@ -858,7 +858,7 @@ class MusicController(CoreController):
                 tg.create_task(self.refresh_item(media_item))
 
     @api_command("music/refresh_item")
-    async def refresh_item(
+    async def refresh_item(  # noqa: PLR0915
         self,
         media_item: str | MediaItemType,
     ) -> MediaItemType | None:
@@ -939,7 +939,7 @@ class MusicController(CoreController):
                         await self.mass.music.tracks.update_item_in_library(
                             album_track.item_id, prov_track
                         )
-
+        await ctrl.match_providers(library_item)
         await self.mass.metadata.update_metadata(library_item, force_refresh=True)
         return library_item
 
@@ -1541,6 +1541,29 @@ class MusicController(CoreController):
                         in_library=None,
                     )
                 )
+
+    @api_command("music/add_provider_mapping")
+    async def add_provider_mapping(
+        self, media_type: MediaType, db_id: str, mapping: ProviderMapping
+    ) -> None:
+        """Add provider mapping to the given library item."""
+        ctrl = self.get_controller(media_type)
+        await ctrl.add_provider_mappings(db_id, [mapping])
+
+    @api_command("music/remove_provider_mapping")
+    async def remove_provider_mapping(
+        self, media_type: MediaType, db_id: str, mapping: ProviderMapping
+    ) -> None:
+        """Remove provider mapping from the given library item."""
+        ctrl = self.get_controller(media_type)
+        await ctrl.remove_provider_mapping(db_id, mapping.provider_instance, mapping.item_id)
+
+    @api_command("music/match_providers")
+    async def match_providers(self, media_type: MediaType, db_id: str) -> None:
+        """Search for mappings on all providers for the given library item."""
+        ctrl = self.get_controller(media_type)
+        db_item = await ctrl.get_library_item(db_id)
+        await ctrl.match_providers(db_item)
 
     async def _get_default_recommendations(self) -> list[RecommendationFolder]:
         """Return default recommendations."""

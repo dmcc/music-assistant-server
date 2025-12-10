@@ -265,7 +265,9 @@ class PlaylistController(MediaControllerBase[Playlist]):
             ):
                 # try to match the track to the playlist provider
                 full_track.provider_mappings.update(
-                    await self.mass.music.tracks.match_provider(playlist_prov, full_track, False)
+                    await self.mass.music.tracks.match_provider(
+                        full_track, playlist_prov, strict=False
+                    )
                 )
 
             # a track can contain multiple versions on the same provider

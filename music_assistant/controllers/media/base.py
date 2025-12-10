@@ -568,13 +568,30 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
         self, item_id: str | int, provider_mapping: ProviderMapping
     ) -> None:
         """Add provider mapping to existing library item."""
+        await self.add_provider_mappings(item_id, [provider_mapping])
+
+    @final
+    async def add_provider_mappings(
+        self, item_id: str | int, provider_mappings: Iterable[ProviderMapping]
+    ) -> None:
+        """
+        Add provider mappings to existing library item.
+
+        :param item_id: The library item ID to add mappings to.
+        :param provider_mappings: The provider mappings to add.
+        """
         db_id = int(item_id)  # ensure integer
         library_item = await self.get_library_item(db_id)
-        # ignore if the mapping is already present
-        if provider_mapping in library_item.provider_mappings:
-            return
-        library_item.provider_mappings.add(provider_mapping)
-        await self.set_provider_mappings(db_id, library_item.provider_mappings)
+        new_mappings: set[ProviderMapping] = set()
+        for provider_mapping in provider_mappings:
+            # ignore if the mapping is already present
+            if provider_mapping not in library_item.provider_mappings:
+                new_mappings.add(provider_mapping)
+        if new_mappings:
+            library_item.provider_mappings.update(new_mappings)
+            self.mass.music.match_provider_instances(library_item)
+            await self.set_provider_mappings(db_id, library_item.provider_mappings)
+            self.mass.signal_event(EventType.MEDIA_ITEM_UPDATED, library_item.uri, library_item)
 
     @final
     async def remove_provider_mapping(
