@@ -1479,6 +1479,7 @@ class ConfigController:
             # loading failed, remove config
             self.remove(conf_key)
             raise
-        # mark onboard as complete as soon as the first provider is added
-        await self.set_onboard_complete()
+        if not self.onboard_done:
+            # mark onboard as complete as soon as the first provider is added
+            await self.set_onboard_complete()
         return config
