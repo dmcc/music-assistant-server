@@ -1965,8 +1965,8 @@ class PlayerController(CoreController):
         await self.wait_for_state(
             player,
             PlaybackState.IDLE,
-            timeout=announcement.duration + 6,
-            minimal_time=float(announcement.duration),
+            timeout=announcement.duration + 10,
+            minimal_time=float(announcement.duration) + 2,
         )
         self.logger.debug(
             "Announcement to player %s - restore previous state...", player.display_name
