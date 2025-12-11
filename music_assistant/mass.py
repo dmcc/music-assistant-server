@@ -499,13 +499,12 @@ class MusicAssistant:
         self._tracked_timers[task_id] = handle
         return handle
 
-    def get_task(self, task_id: str) -> asyncio.Task[Any]:
+    def get_task(self, task_id: str) -> asyncio.Task[Any] | None:
         """Get existing scheduled task."""
         if existing := self._tracked_tasks.get(task_id):
             # prevent duplicate tasks if task_id is given and already present
             return existing
-        msg = "Task does not exist"
-        raise KeyError(msg)
+        return None
 
     def cancel_task(self, task_id: str) -> None:
         """Cancel existing scheduled task."""
