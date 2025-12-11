@@ -124,7 +124,8 @@ class ArtistsController(MediaControllerBase[Artist]):
             # return in-library items only
             return result
         # return all (unique) items from all providers
-        unique_ids: set[str] = set()
+        # initialize unique_ids with db_items to prevent duplicates
+        unique_ids: set[str] = {f"{item.name}.{item.version}" for item in db_items}
         for provider_mapping in library_artist.provider_mappings:
             provider_tracks = await self.get_provider_artist_toptracks(
                 provider_mapping.item_id, provider_mapping.provider_instance
@@ -162,7 +163,8 @@ class ArtistsController(MediaControllerBase[Artist]):
             # return in-library items only
             return result
         # return all (unique) items from all providers
-        unique_ids: set[str] = set()
+        # initialize unique_ids with db_items to prevent duplicates
+        unique_ids: set[str] = {f"{item.name}.{item.version}" for item in db_items}
         for provider_mapping in library_artist.provider_mappings:
             provider_albums = await self.get_provider_artist_albums(
                 provider_mapping.item_id, provider_mapping.provider_instance
