@@ -1493,4 +1493,7 @@ class ConfigController:
         if not self.onboard_done:
             # mark onboard as complete as soon as the first provider is added
             await self.set_onboard_complete()
+        if manifest.type == ProviderType.MUSIC:
+            # correct any multi-instance provider mappings
+            self.mass.create_task(self.mass.music.correct_multi_instance_provider_mappings())
         return config

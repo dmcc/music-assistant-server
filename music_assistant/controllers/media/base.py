@@ -782,6 +782,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
             )
         # build and execute final query
         sql_query = self._build_final_query(query_parts, join_parts, order_by)
+
         return [
             cast("ItemCls", self.item_cls.from_dict(self._parse_db_row(db_row)))
             for db_row in await self.mass.music.database.get_rows_from_query(

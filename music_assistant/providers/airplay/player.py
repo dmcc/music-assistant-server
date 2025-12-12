@@ -497,7 +497,8 @@ class AirPlayPlayer(Player):
                 if child_player.player_id in player_ids_to_remove:
                     if stream_session:
                         await stream_session.remove_client(child_player)
-                    self._attr_group_members.remove(child_player.player_id)
+                    if child_player.player_id in self._attr_group_members:
+                        self._attr_group_members.remove(child_player.player_id)
 
         # handle additions
         for player_id in player_ids_to_add or []:

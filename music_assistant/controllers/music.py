@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import shutil
+import time
 from collections.abc import Sequence
 from contextlib import suppress
 from copy import deepcopy
@@ -99,6 +100,8 @@ DB_SCHEMA_VERSION: Final[int] = 23
 
 CACHE_CATEGORY_LAST_SYNC: Final[int] = 9
 CACHE_CATEGORY_SEARCH_RESULTS: Final[int] = 10
+LAST_PROVIDER_INSTANCE_SCAN: Final[str] = "last_provider_instance_scan"
+PROVIDER_INSTANCE_SCAN_INTERVAL: Final[int] = 30 * 24 * 60 * 60  # one month in seconds
 
 
 class MusicController(CoreController):
@@ -176,6 +179,10 @@ class MusicController(CoreController):
             self.domain, CONF_DELETED_PROVIDERS, []
         ):
             await self.cleanup_provider(removed_provider)
+        # schedule cleanup task for matching provider instances
+        last_scan = cast("int", self.config.get_value(LAST_PROVIDER_INSTANCE_SCAN, 0))
+        if time.time() - last_scan > PROVIDER_INSTANCE_SCAN_INTERVAL:
+            self.mass.call_later(60, self.correct_multi_instance_provider_mappings)
 
     async def close(self) -> None:
         """Cleanup on exit."""
@@ -1359,8 +1366,11 @@ class MusicController(CoreController):
         """Return all provider instances for a given domain."""
         return [
             prov
-            for prov in self.providers
-            if prov.domain == domain and (return_unavailable or prov.available)
+            # don't use self.providers here as that applies user filters
+            for prov in self.mass.providers
+            if isinstance(prov, MusicProvider)
+            and prov.domain == domain
+            and (return_unavailable or prov.available)
         ]
 
     def get_unique_providers(self) -> set[str]:
@@ -1502,13 +1512,14 @@ class MusicController(CoreController):
     def match_provider_instances(
         self,
         item: MediaItemType,
-    ) -> None:
+    ) -> bool:
         """Match all provider instances for the given item."""
+        mappings_added = False
         for provider_mapping in list(item.provider_mappings):
             if provider_mapping.is_unique:
                 # unique mapping, no need to map
                 continue
-            if not (provider := self.mass.get_provider(item.provider)):
+            if not (provider := self.mass.get_provider(provider_mapping.provider_instance)):
                 continue
             if not provider.is_streaming_provider:
                 continue
@@ -1541,6 +1552,8 @@ class MusicController(CoreController):
                         in_library=None,
                     )
                 )
+                mappings_added = True
+        return mappings_added
 
     @api_command("music/add_provider_mapping")
     async def add_provider_mapping(
@@ -2430,3 +2443,30 @@ class MusicController(CoreController):
                 """
             )
         await self.database.commit()
+
+    async def correct_multi_instance_provider_mappings(self) -> None:
+        """Correct provider mappings for multi-instance providers."""
+        self.logger.debug("Correcting provider mappings for multi-instance providers...")
+        multi_instance_providers: set[str] = set()
+        for provider in self.providers:
+            if len(self.get_provider_instances(provider.domain)) > 1:
+                multi_instance_providers.add(provider.instance_id)
+        if not multi_instance_providers:
+            return  # no multi-instance providers found, nothing to do
+
+        for ctrl in (
+            self.albums,
+            self.artists,
+            self.tracks,
+            self.playlists,
+            self.radio,
+            self.audiobooks,
+            self.podcasts,
+        ):
+            async for db_item in ctrl.iter_library_items(provider=list(multi_instance_providers)):
+                if self.match_provider_instances(db_item):
+                    await ctrl.update_item_in_library(db_item.item_id, db_item)
+        self.mass.config.set_raw_core_config_value(
+            self.domain, LAST_PROVIDER_INSTANCE_SCAN, int(time.time())
+        )
+        self.logger.debug("Provider mappings correction done")

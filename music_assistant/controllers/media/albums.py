@@ -20,6 +20,7 @@ from music_assistant_models.media_items import (
 
 from music_assistant.constants import DB_TABLE_ALBUM_ARTISTS, DB_TABLE_ALBUM_TRACKS, DB_TABLE_ALBUMS
 from music_assistant.controllers.media.base import MediaControllerBase
+from music_assistant.controllers.webserver.helpers.auth_middleware import get_current_user
 from music_assistant.helpers.compare import (
     compare_album,
     compare_artists,
@@ -250,7 +251,17 @@ class AlbumsController(MediaControllerBase[Album]):
             item_id, provider_instance_id_or_domain
         )
         if not library_album:
-            return await self._get_provider_album_tracks(item_id, provider_instance_id_or_domain)
+            album_tracks = await self._get_provider_album_tracks(
+                item_id, provider_instance_id_or_domain
+            )
+            if album_tracks and not album_tracks[0].image:
+                # set album image from provider album if not present on tracks
+                prov_album = await self.get_provider_item(item_id, provider_instance_id_or_domain)
+                if prov_album.image:
+                    for track in album_tracks:
+                        if not track.image:
+                            track.metadata.add_image(prov_album.image)
+            return album_tracks
 
         db_items = await self.get_library_album_tracks(library_album.item_id)
         result: list[Track] = list(db_items)
@@ -265,7 +276,14 @@ class AlbumsController(MediaControllerBase[Album]):
         unique_ids.update({f"{x.name.lower()}.{x.version.lower()}" for x in db_items})
         for db_item in db_items:
             unique_ids.update(x.item_id for x in db_item.provider_mappings)
+        user = get_current_user()
+        user_provider_filter = user.provider_filter if user and user.provider_filter else None
         for provider_mapping in library_album.provider_mappings:
+            if (
+                user_provider_filter
+                and provider_mapping.provider_instance not in user_provider_filter
+            ):
+                continue
             provider_tracks = await self._get_provider_album_tracks(
                 provider_mapping.item_id, provider_mapping.provider_instance
             )
