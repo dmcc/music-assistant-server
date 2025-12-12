@@ -187,6 +187,7 @@ class SendspinPlayer(Player):
     last_sent_artist_artwork_url: str | None = None
     _playback_task: asyncio.Task[None] | None = None
     timed_client_stream: TimedClientStream | None = None
+    is_web_player: bool = False
 
     def __init__(self, provider: SendspinProvider, player_id: str) -> None:
         """Initialize the Player."""
@@ -211,7 +212,14 @@ class SendspinPlayer(Player):
         }
         self._attr_can_group_with = {provider.instance_id}
         self._attr_power_control = PLAYER_CONTROL_NONE
-        self._attr_device_info = DeviceInfo()
+        if device_info := sendspin_client.info.device_info:
+            self._attr_device_info = DeviceInfo(
+                model=device_info.product_name or "Unknown model",
+                manufacturer=device_info.manufacturer or "Unknown Manufacturer",
+                software_version=device_info.software_version,
+            )
+        else:
+            self._attr_device_info = DeviceInfo()
         if player_client := sendspin_client.player:
             self._attr_volume_level = player_client.volume
             self._attr_volume_muted = player_client.muted
@@ -222,7 +230,12 @@ class SendspinPlayer(Player):
                 (EventType.QUEUE_UPDATED),
             )
         )
-        self._attr_expose_to_ha_by_default = "Music Assistant Web" not in sendspin_client.name
+        self.is_web_player = sendspin_client.name.startswith(
+            "Music Assistant Web ("  # The regular Web Interface
+        ) or sendspin_client.name.startswith(
+            "Music Assistant ("  # The PWA App
+        )
+        self._attr_expose_to_ha_by_default = not self.is_web_player
 
     async def event_cb(self, client: SendspinClient, event: ClientEvent) -> None:
         """Event callback registered to the sendspin server."""
@@ -282,8 +295,10 @@ class SendspinPlayer(Player):
     async def group_event_cb(self, group: SendspinGroup, event: GroupEvent) -> None:
         """Event callback registered to the sendspin group this player belongs to."""
         if self.synced_to is not None:
-            # Only handle group events as the leader, except for GroupMemberRemovedEvent
-            if not isinstance(event, GroupMemberRemovedEvent):
+            # Only handle group events as the leader, except for:
+            # - GroupMemberRemovedEvent: to handle being removed from a group
+            # - GroupStateChangedEvent: to update playback state when leader stops/disconnects
+            if not isinstance(event, (GroupMemberRemovedEvent, GroupStateChangedEvent)):
                 return
         self.logger.debug("Received GroupEvent: %s", event)
 
@@ -324,7 +339,9 @@ class SendspinPlayer(Player):
                         if len(group_members) > 0 and (
                             new_leader := self.mass.players.get(group_members[0])
                         ):
+                            new_leader = cast("SendspinPlayer", new_leader)
                             new_leader._attr_group_members = group_members[1:]
+                            new_leader.api.disconnect_behaviour = DisconnectBehaviour.STOP
                             new_leader.update_state()
                     self.update_state()
                 elif client_id in self._attr_group_members:
