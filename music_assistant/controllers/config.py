@@ -146,10 +146,6 @@ class ConfigController:
         self.save(immediate=True)
         LOGGER.info("Onboarding completed")
 
-        # (re)Announce to Home Assistant if running as addon
-        if self.mass.running_as_hass_addon:
-            await self.mass.webserver._announce_to_homeassistant()
-
     async def close(self) -> None:
         """Handle logic on server stop."""
         if not self._timer_handle:
