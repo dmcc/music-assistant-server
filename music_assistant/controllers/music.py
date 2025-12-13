@@ -203,8 +203,19 @@ class MusicController(CoreController):
 
     @property
     def providers(self) -> list[MusicProvider]:
-        """Return all loaded/running MusicProviders (instances)."""
-        return self.mass.get_providers(ProviderType.MUSIC)
+        """
+        Return all loaded/running MusicProviders (instances).
+
+        Note that this applies user provider filters (for all user types).
+        """
+        user = get_current_user()
+        user_provider_filter = user.provider_filter if user else None
+        return [
+            x
+            for x in self.mass.providers
+            if x.type == ProviderType.MUSIC
+            and (not user_provider_filter or x.instance_id in user_provider_filter)
+        ]
 
     @api_command("music/sync")
     async def start_sync(
@@ -256,10 +267,10 @@ class MusicController(CoreController):
         :param media_types: A list of media_types to include.
         :param limit: number of items to return in the search (per type).
         """
-        # use a (short-lived) cache to avoid repeated searches
-        cache_key = f"{search_query}{'-'.join(sorted([mt.value for mt in media_types]))}-{limit}-{library_only}"  # noqa: E501
-        if user := get_current_user():
-            cache_key += user.user_id
+        # use cache to avoid repeated searches
+        search_providers = sorted(self.get_unique_providers())
+        cache_provider_key = "library" if library_only else ",".join(search_providers)
+        cache_key = f"{search_query}{'-'.join(sorted([mt.value for mt in media_types]))}-{limit}-{library_only}-{cache_provider_key}"  # noqa: E501
         if cache := await self.mass.cache.get(
             key=cache_key, provider=self.domain, category=CACHE_CATEGORY_SEARCH_RESULTS
         ):
@@ -325,7 +336,6 @@ class MusicController(CoreController):
                 for prov_mapping in item.provider_mappings
             }
             # include results from library + all (unique) music providers
-            search_providers = self.get_unique_providers()
             results_per_provider += await asyncio.gather(
                 *[
                     self._search_provider(
@@ -398,7 +408,7 @@ class MusicController(CoreController):
         await self.mass.cache.set(
             key=cache_key,
             data=result,
-            expiration=300,
+            expiration=600,
             provider=self.domain,
             category=CACHE_CATEGORY_SEARCH_RESULTS,
         )
@@ -1363,34 +1373,36 @@ class MusicController(CoreController):
     def get_provider_instances(
         self, domain: str, return_unavailable: bool = False
     ) -> list[MusicProvider]:
-        """Return all provider instances for a given domain."""
-        return [
-            prov
-            # don't use self.providers here as that applies user filters
-            for prov in self.mass.providers
-            if isinstance(prov, MusicProvider)
-            and prov.domain == domain
-            and (return_unavailable or prov.available)
-        ]
+        """
+        Return all provider instances for a given domain.
 
-    def get_unique_providers(self) -> set[str]:
+        Note that this skips user filters so may only be called from internal code.
+        """
+        return cast(
+            "list[MusicProvider]",
+            self.mass.get_provider_instances(domain, return_unavailable, ProviderType.MUSIC),
+        )
+
+    def get_unique_providers(self) -> list[str]:
         """
         Return all unique MusicProvider (instance or domain) ids.
 
         This will return a set of provider instance ids but will only return
         a single instance_id per streaming provider domain.
+
+        Applies user provider filters (for non-admin users).
         """
         processed_domains: set[str] = set()
         # Get user provider filter if set
         user = get_current_user()
         user_provider_filter = user.provider_filter if user and user.provider_filter else None
-        result: set[str] = set()
+        result: list[str] = []
         for provider in self.providers:
             if provider.is_streaming_provider and provider.domain in processed_domains:
                 continue
             if user_provider_filter and provider.instance_id not in user_provider_filter:
                 continue
-            result.add(provider.instance_id)
+            result.append(provider.instance_id)
             processed_domains.add(provider.domain)
         return result
 

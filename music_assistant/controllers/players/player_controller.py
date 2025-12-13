@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Concatenate, TypedDict, cast, overload
 
+from music_assistant_models.auth import UserRole
 from music_assistant_models.constants import (
     PLAYER_CONTROL_FAKE,
     PLAYER_CONTROL_NATIVE,
@@ -249,6 +250,8 @@ class PlayerController(CoreController):
         """
         Return all registered players.
 
+        Note that this applies user filters for players (for non admin users).
+
         :param return_unavailable [bool]: Include unavailable players.
         :param return_disabled [bool]: Include disabled players.
         :param provider_filter [str]: Optional filter by provider lookup key.
@@ -256,7 +259,11 @@ class PlayerController(CoreController):
         :return: List of Player objects.
         """
         current_user = get_current_user()
-        user_filter = current_user.player_filter if current_user else []
+        user_filter = (
+            current_user.player_filter
+            if current_user and current_user.role != UserRole.ADMIN
+            else None
+        )
         return [
             player
             for player in self._players.values()
@@ -331,6 +338,15 @@ class PlayerController(CoreController):
         :raises PlayerUnavailableError: If player is unavailable and raise_unavailable is True.
         :return: Player object or None.
         """
+        current_user = get_current_user()
+        user_filter = (
+            current_user.player_filter
+            if current_user and current_user.role != UserRole.ADMIN
+            else None
+        )
+        if current_user and user_filter and player_id not in user_filter:
+            msg = f"{current_user.username} does not have access to player {player_id}"
+            raise InsufficientPermissions(msg)
         if player := self.get(player_id, raise_unavailable):
             return player.state
         return None
@@ -352,7 +368,16 @@ class PlayerController(CoreController):
         :param name: Name of the player.
         :return: PlayerState object or None.
         """
+        current_user = get_current_user()
+        user_filter = (
+            current_user.player_filter
+            if current_user and current_user.role != UserRole.ADMIN
+            else None
+        )
         if player := self.get_player_by_name(name):
+            if current_user and user_filter and player.player_id not in user_filter:
+                msg = f"{current_user.username} does not have access to player {player.player_id}"
+                raise InsufficientPermissions(msg)
             return player.state
         return None
 
