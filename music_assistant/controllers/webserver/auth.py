@@ -260,7 +260,6 @@ class AuthenticationManager:
 
         # Migration to version 4: Make usernames case-insensitive by converting to lowercase
         if from_version < 4:
-            self.logger.info("Converting all usernames to lowercase for case-insensitive auth")
             await self.database.execute("UPDATE users SET username = LOWER(username)")
             await self.database.commit()
 

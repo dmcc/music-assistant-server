@@ -85,8 +85,6 @@ def _save_certificate(
     # Set restrictive permissions on private key (owner read/write only)
     key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
-    LOGGER.info("Saved WebRTC certificate to %s", cert_path)
-
 
 def _load_certificate(
     storage_path: str,
@@ -129,18 +127,10 @@ def _is_certificate_valid(cert: x509.Certificate) -> bool:
     not_after = cert.not_valid_after_utc
 
     if now >= not_after:
-        LOGGER.info("WebRTC certificate has expired")
         return False
 
     days_remaining = (not_after - now).days
-    if days_remaining < CERT_RENEWAL_THRESHOLD_DAYS:
-        LOGGER.info(
-            "WebRTC certificate expires in %d days, will regenerate",
-            days_remaining,
-        )
-        return False
-
-    return True
+    return not days_remaining < CERT_RENEWAL_THRESHOLD_DAYS
 
 
 def get_or_create_webrtc_certificate(storage_path: str) -> RTCCertificate:
@@ -160,7 +150,7 @@ def get_or_create_webrtc_certificate(storage_path: str) -> RTCCertificate:
         if _is_certificate_valid(cert):
             return RTCCertificate(key=private_key, cert=cert)
 
-    LOGGER.info("Generating new WebRTC DTLS certificate (valid for %d days)", CERT_VALIDITY_DAYS)
+    LOGGER.debug("Generating new WebRTC DTLS certificate (valid for %d days)", CERT_VALIDITY_DAYS)
     private_key, cert = _generate_certificate()
     _save_certificate(storage_path, private_key, cert)
 
