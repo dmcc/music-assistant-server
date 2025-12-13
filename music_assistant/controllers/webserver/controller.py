@@ -613,12 +613,9 @@ class WebserverController(CoreController):
 
     async def _handle_index(self, request: web.Request) -> web.StreamResponse:
         """Handle request for index page (Vue frontend)."""
-        # If not yet onboarded, redirect to setup
-        if (
-            not self.auth.has_users
-            and not self.mass.config.onboard_done
-            and is_request_from_ingress(request)
-        ):
+        is_ingress_request = is_request_from_ingress(request)
+
+        if (not self.auth.has_users or not self.mass.config.onboard_done) and is_ingress_request:
             # a non-admin user tries to access the index via HA ingress
             # while we're not yet onboarded, prevent that as it leads to a bad UX
             ingress_user_id = request.headers.get("X-Remote-User-ID", "")
@@ -631,9 +628,11 @@ class WebserverController(CoreController):
             # NOTE: For ingress admin user,
             # we allow access to index, user will be auto created and then forwarded to the
             # frontend (which will take care of onboarding)
-        if not self.auth.has_users:
+
+        if not self.auth.has_users and not is_ingress_request:
             # non ingress request and no users yet, redirect to setup
             return web.Response(status=302, headers={"Location": "setup"})
+
         # Serve the Vue frontend index.html
         return await self._server.serve_static(self._index_path, request)
 
