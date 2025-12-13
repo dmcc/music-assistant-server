@@ -7,7 +7,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime
@@ -86,6 +86,7 @@ from .media.radio import RadioController
 from .media.tracks import TracksController
 
 if TYPE_CHECKING:
+    from music_assistant_models.auth import User
     from music_assistant_models.config_entries import CoreConfig
     from music_assistant_models.media_items import Audiobook, PodcastEpisode
 
@@ -1088,7 +1089,6 @@ class MusicController(CoreController):
         seconds_played: int | None = None,
         is_playing: bool = False,
         userid: str | None = None,
-        all_users: bool = False,
     ) -> None:
         """
         Mark item as played in playlog.
@@ -1098,7 +1098,6 @@ class MusicController(CoreController):
         :param seconds_played: The number of seconds played.
         :param is_playing: If True, the item is currently playing.
         :param userid: The user ID to mark the item as played for (instead of the current user).
-        :param all_users: If True, mark the item as played for all users.
         """
         timestamp = utc_timestamp()
         if (
@@ -1119,12 +1118,21 @@ class MusicController(CoreController):
             "seconds_played": seconds_played,
             "timestamp": timestamp,
         }
-        if not all_users:
-            if not userid:
-                current_user = get_current_user()
-                userid = current_user.user_id if current_user else None
-            if userid:
-                params["userid"] = userid
+        # try to figure out the user that triggered the action
+        user: User | None = None
+        if userid:
+            # userid overridden by parameter
+            user = await self.mass.webserver.auth.get_user(userid)
+        elif session_user := get_current_user():
+            # this is the active session user that triggered the action
+            user = session_user
+        elif provider_user := await self._get_user_for_provider(media_item.provider_mappings):
+            # based on configured provider filter we can try to find a user
+            user = provider_user
+
+        if user:
+            # NOTE: if no user was found, we will alter the playlog for all users
+            params["userid"] = user.user_id
 
         # update generic playlog table (when not playing)
         if not is_playing:
@@ -1136,6 +1144,12 @@ class MusicController(CoreController):
 
         # forward to provider(s) to sync resume state (e.g. for audiobooks)
         for prov_mapping in media_item.provider_mappings:
+            if (
+                user
+                and user.provider_filter
+                and prov_mapping.provider_instance not in user.provider_filter
+            ):
+                continue
             if music_prov := self.mass.get_provider(prov_mapping.provider_instance):
                 self.mass.create_task(
                     music_prov.on_played(
@@ -1166,26 +1180,45 @@ class MusicController(CoreController):
     async def mark_item_unplayed(
         self,
         media_item: MediaItemType,
-        all_users: bool = False,
+        userid: str | None = None,
     ) -> None:
         """
         Mark item as unplayed in playlog.
 
         :param media_item: The media item to mark as unplayed.
         :param all_users: If True, mark the item as unplayed for all users.
+        :param userid: The user ID to mark the item as unplayed for (instead of the current user).
         """
-        current_user = get_current_user()
-        user_id = current_user.user_id if current_user else "system"
         params = {
             "item_id": media_item.item_id,
             "provider": media_item.provider,
             "media_type": media_item.media_type.value,
         }
-        if not all_users:
-            params["userid"] = user_id
+        # try to figure out the user that triggered the action
+        user: User | None = None
+        if userid:
+            # userid overridden by parameter
+            user = await self.mass.webserver.auth.get_user(userid)
+        elif session_user := get_current_user():
+            # this is the active session user that triggered the action
+            user = session_user
+        elif provider_user := await self._get_user_for_provider(media_item.provider_mappings):
+            # based on configured provider filter we can try to find a user
+            user = provider_user
+
+        if user:
+            # NOTE: if no user was found, we will alter the playlog for all users
+            params["userid"] = user.user_id
+
         await self.database.delete(DB_TABLE_PLAYLOG, params)
         # forward to provider(s) to sync resume state (e.g. for audiobooks)
         for prov_mapping in media_item.provider_mappings:
+            if (
+                user
+                and user.provider_filter
+                and prov_mapping.provider_instance not in user.provider_filter
+            ):
+                continue
             if music_prov := self.mass.get_provider(prov_mapping.provider_instance):
                 self.mass.create_task(
                     music_prov.on_played(
@@ -2482,3 +2515,16 @@ class MusicController(CoreController):
             self.domain, LAST_PROVIDER_INSTANCE_SCAN, int(time.time())
         )
         self.logger.debug("Provider mappings correction done")
+
+    async def _get_user_for_provider(
+        self, provider_mappings: Iterable[ProviderMapping]
+    ) -> User | None:
+        """Try to get the MA User based on provider mappings and provider filter."""
+        all_users = await self.mass.webserver.auth.list_users()
+        for mapping in provider_mappings:
+            for user in all_users:
+                if not user.provider_filter:
+                    continue
+                if mapping.provider_instance in user.provider_filter:
+                    return user
+        return None
