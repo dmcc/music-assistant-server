@@ -517,25 +517,13 @@ class StreamsController(CoreController):
         # this final ffmpeg process in the chain will convert the raw, lossless PCM audio into
         # the desired output format for the player including any player specific filter params
         # such as channels mixing, DSP, resampling and, only if needed, encoding to lossy formats
-
-        # readrate filter input args to control buffering
-        # we need to slowly feed the music to avoid the player stopping and later
-        # restarting (or completely failing) the audio stream by keeping the buffer short.
-        # this is reported to be an issue especially with Chromecast players.
-        # see for example: https://github.com/music-assistant/support/issues/3717
-        user_agent = request.headers.get("User-Agent", "")
         if queue_item.media_type == MediaType.RADIO:
             # keep very short buffer for radio streams
             # to keep them (more or less) realtime and prevent time outs
             read_rate_input_args = ["-readrate", "1.0", "-readrate_initial_burst", "2"]
-        elif "Network_Module" in user_agent or "transferMode.dlna.org" in request.headers:
-            # and ofcourse we have an exception of the exception. Where most players actually NEED
-            # the readrate filter to avoid disconnecting, some other players (DLNA/MusicCast)
-            # actually fail when the filter is used. So we disable it completely for those players.
-            read_rate_input_args = None  # disable readrate for DLNA players
         else:
-            # allow buffer ahead of 10 seconds and read 1.5x faster than realtime
-            read_rate_input_args = ["-readrate", "1.5", "-readrate_initial_burst", "10"]
+            # just allow the player to buffer whatever it wants for single item streams
+            read_rate_input_args = None
 
         first_chunk_received = False
         bytes_sent = 0
@@ -674,8 +662,8 @@ class StreamsController(CoreController):
             # restarting (or completely failing) the audio stream by keeping the buffer short.
             # this is reported to be an issue especially with Chromecast players.
             # see for example: https://github.com/music-assistant/support/issues/3717
-            # allow buffer ahead of 8 seconds and read slightly faster than realtime
-            extra_input_args=["-readrate", "1.01", "-readrate_initial_burst", "8"],
+            # allow buffer ahead of 6 seconds and read rest in realtime
+            extra_input_args=["-readrate", "1.0", "-readrate_initial_burst", "6"],
             chunk_size=icy_meta_interval if enable_icy else get_chunksize(output_format),
         ):
             try:
