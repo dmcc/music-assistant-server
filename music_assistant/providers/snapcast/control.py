@@ -283,7 +283,7 @@ class MusicAssistantControl:
                 properties["metadata"]["artistSort"] = [
                     x["sort_name"] for x in media_item["artists"]
                 ]
-            if "album" in media_item:
+            if media_item.get("album"):
                 properties["metadata"]["album"] = media_item["album"]["name"]
                 properties["metadata"]["albumSort"] = media_item["album"]["sort_name"]
         elif current_queue_item:
