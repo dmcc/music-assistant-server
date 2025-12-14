@@ -562,7 +562,16 @@ class MusicController(CoreController):
     ) -> list[ItemMapping]:
         """Return a list of the last played items."""
         if media_types is None:
-            media_types = MediaType.ALL
+            media_types = [
+                MediaType.ALBUM,
+                MediaType.AUDIOBOOK,
+                MediaType.ARTIST,
+                MediaType.PLAYLIST,
+                MediaType.PODCAST,
+                MediaType.FOLDER,
+                MediaType.RADIO,
+                MediaType.GENRE,
+            ]
         media_types_str = "(" + ",".join(f'"{x}"' for x in media_types) + ")"
         available_providers = ("library", *self.get_unique_providers())
         available_providers_str = "(" + ",".join(f'"{x}"' for x in available_providers) + ")"
