@@ -219,6 +219,7 @@ class AirPlayStreamSession:
     async def _audio_streamer(self, audio_source: AsyncGenerator[bytes, None]) -> None:
         """Stream audio to all players."""
         _last_metadata: str | None = None
+        prev_progress_report: float = 0.0
         pcm_sample_size = self.pcm_format.pcm_sample_size
         stream_start_time = time.time()
         first_chunk_received = False
