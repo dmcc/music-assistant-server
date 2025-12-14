@@ -1832,6 +1832,16 @@ class PlayerQueuesController(CoreController):
             queue.display_name,
             ", ".join([x.name for x in queue.radio_source]),
         )
+
+        # Get user's preferred provider instances for steering provider selection
+        preferred_provider_instances: list[str] | None = None
+        if (
+            queue.userid
+            and (playback_user := await self.mass.webserver.auth.get_user(queue.userid))
+            and playback_user.provider_filter
+        ):
+            preferred_provider_instances = playback_user.provider_filter
+
         available_base_tracks: list[Track] = []
         base_track_sample_size = 5
         # Some providers have very deterministic similar track algorithms when providing
@@ -1852,7 +1862,8 @@ class PlayerQueuesController(CoreController):
                     available_base_tracks += [
                         track
                         for track in await ctrl.radio_mode_base_tracks(
-                            radio_item.item_id, radio_item.provider
+                            radio_item,  # type: ignore[arg-type]
+                            preferred_provider_instances,
                         )
                         # Avoid duplicate base tracks
                         if track not in available_base_tracks
@@ -1883,6 +1894,7 @@ class PlayerQueuesController(CoreController):
                         base_track.item_id,
                         base_track.provider,
                         allow_lookup=allow_lookup,
+                        preferred_provider_instances=preferred_provider_instances,
                     )
                 except MediaNotFoundError:
                     # Some providers don't have similar tracks for all items. For example,
