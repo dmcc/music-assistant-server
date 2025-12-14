@@ -134,12 +134,12 @@ class AirPlayStreamSession:
 
     async def remove_client(self, airplay_player: AirPlayPlayer) -> None:
         """Remove a sync client from the session."""
-        if airplay_player not in self.sync_clients:
-            return
-        assert airplay_player.stream
-        assert airplay_player.stream.session == self
         async with self._lock:
+            if airplay_player not in self.sync_clients:
+                return
             self.sync_clients.remove(airplay_player)
+        if not airplay_player.stream or airplay_player.stream.session != self:
+            return
         await airplay_player.stream.stop()
         if ffmpeg := self._player_ffmpeg.pop(airplay_player.player_id, None):
             await ffmpeg.close()
