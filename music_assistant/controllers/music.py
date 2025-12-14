@@ -2534,6 +2534,8 @@ class MusicController(CoreController):
             async for db_item in ctrl.iter_library_items(provider=list(multi_instance_providers)):
                 if self.match_provider_instances(db_item):
                     await ctrl.update_item_in_library(db_item.item_id, db_item)
+                # prevent overwhelming the event loop
+                await asyncio.sleep(0.2)
         self.mass.config.set_raw_core_config_value(
             self.domain, LAST_PROVIDER_INSTANCE_SCAN, int(time.time())
         )
