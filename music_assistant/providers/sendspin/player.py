@@ -49,6 +49,7 @@ from music_assistant.constants import (
     CONF_ENTRY_HTTP_PROFILE_HIDDEN,
     CONF_ENTRY_OUTPUT_CODEC_HIDDEN,
     CONF_ENTRY_SAMPLE_RATES,
+    CONF_OUTPUT_CHANNELS,
     CONF_OUTPUT_CODEC,
     INTERNAL_PCM_FORMAT,
 )
@@ -140,8 +141,11 @@ class MusicAssistantMediaStream(MediaStream):
         assert multi_client_stream is not None
 
         dsp = mass.config.get_player_dsp_config(player_id)
-        if not dsp.enabled:
-            # DSP is disabled for this player, use main_stream
+        output_channels = mass.config.get_raw_player_config_value(
+            player_id, CONF_OUTPUT_CHANNELS, "stereo"
+        )
+        if not dsp.enabled and output_channels == "stereo":
+            # DSP is disabled and output is stereo, use main_stream
             return None
 
         # Get per-player DSP filter parameters
@@ -535,8 +539,13 @@ class SendspinPlayer(Player):
 
     async def _on_queue_update(self, event: MassEvent) -> None:
         """Extract and send current media metadata to sendspin players on queue updates."""
+        if self.synced_to is not None:
+            # Only leader sends metadata
+            return
         queue = self.mass.player_queues.get_active_queue(self.player_id)
         if not queue or not queue.current_item:
+            # Clear metadata when queue has no current item
+            self.api.group.set_metadata(Metadata())
             return
 
         current_item = queue.current_item
