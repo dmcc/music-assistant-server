@@ -797,14 +797,13 @@ class PlayerController(CoreController):
             if muted:
                 player.extra_data[ATTR_PREVIOUS_VOLUME] = player.volume_level
                 player.extra_data[ATTR_FAKE_MUTE] = True
-                await self.cmd_volume_set(player_id, 0)
+                await self._handle_cmd_volume_set(player_id, 0)
                 player.update_state()
             else:
-                player._attr_volume_muted = False
                 prev_volume = player.extra_data.get(ATTR_PREVIOUS_VOLUME, 1)
                 player.extra_data[ATTR_FAKE_MUTE] = False
                 player.update_state()
-                await self.cmd_volume_set(player_id, prev_volume)
+                await self._handle_cmd_volume_set(player_id, prev_volume)
         else:
             # handle external player control
             player_control = self._controls.get(player.mute_control)
@@ -1983,7 +1982,7 @@ class PlayerController(CoreController):
                         announcement_volume,
                     )
                     tg.create_task(
-                        self.cmd_volume_set(volume_player.player_id, announcement_volume)
+                        self._handle_cmd_volume_set(volume_player.player_id, announcement_volume)
                     )
         # play the announcement
         self.logger.debug(
@@ -2017,7 +2016,7 @@ class PlayerController(CoreController):
         # restore volume
         async with TaskManager(self.mass) as tg:
             for volume_player_id, prev_volume in prev_volumes.items():
-                tg.create_task(self.cmd_volume_set(volume_player_id, prev_volume))
+                tg.create_task(self._handle_cmd_volume_set(volume_player_id, prev_volume))
         await asyncio.sleep(0.2)
         # either power off the player or resume playing
         if not prev_power:
@@ -2329,8 +2328,12 @@ class PlayerController(CoreController):
                 f"Player {player.display_name} does not support volume control"
             )
 
-        if player.mute_control != PLAYER_CONTROL_NONE and player.volume_muted:
+        if (
+            player.mute_control not in (PLAYER_CONTROL_NONE, PLAYER_CONTROL_FAKE)
+            and player.volume_muted
+        ):
             # if player is muted, we unmute it first
+            # skip this for fake mute since it uses volume to simulate mute
             self.logger.debug(
                 "Unmuting player %s before setting volume",
                 player.display_name,
