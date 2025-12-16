@@ -129,6 +129,9 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
             # update existing item
             await self._update_library_item(library_id, item, overwrite=overwrite_existing)
         else:
+            for provider_mapping in item.provider_mappings:
+                if item.item_id == provider_mapping.item_id:
+                    provider_mapping.in_library = True
             # actually add a new item in the library db
             self.mass.music.match_provider_instances(item)
             async with self._db_add_lock:
