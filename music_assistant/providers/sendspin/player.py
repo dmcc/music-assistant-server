@@ -33,7 +33,6 @@ from music_assistant_models.config_entries import ConfigEntry
 from music_assistant_models.constants import PLAYER_CONTROL_NONE
 from music_assistant_models.enums import (
     ContentType,
-    EventType,
     ImageType,
     PlaybackState,
     PlayerFeature,
@@ -75,7 +74,7 @@ SUPPORTED_GROUP_COMMANDS = [
 if TYPE_CHECKING:
     from aiosendspin.server.client import SendspinClient
     from music_assistant_models.config_entries import ConfigValueType
-    from music_assistant_models.event import MassEvent
+    from music_assistant_models.player_queue import PlayerQueue
     from music_assistant_models.queue_item import QueueItem
 
     from .provider import SendspinProvider
@@ -228,12 +227,6 @@ class SendspinPlayer(Player):
             self._attr_volume_level = player_client.volume
             self._attr_volume_muted = player_client.muted
         self._attr_available = True
-        self._on_unload_callbacks.append(
-            self.mass.subscribe(
-                self._on_queue_update,
-                (EventType.QUEUE_UPDATED),
-            )
-        )
         self.is_web_player = sendspin_client.name.startswith(
             "Music Assistant Web ("  # The regular Web Interface
         ) or sendspin_client.name.startswith(
@@ -537,71 +530,58 @@ class SendspinPlayer(Player):
                 # Clear artist artwork if none available
                 await self.api.group.set_media_art(None, source=ArtworkSource.ARTIST)
 
-    async def _on_queue_update(self, event: MassEvent) -> None:
-        """Extract and send current media metadata to sendspin players on queue updates."""
+    def _on_player_media_updated(self) -> None:
+        """Handle callback when the current media of the player is updated."""
         if self.synced_to is not None:
             # Only leader sends metadata
             return
-        queue = self.mass.player_queues.get_active_queue(self.player_id)
-        if not queue or not queue.current_item:
-            # Clear metadata when queue has no current item
+
+        if self.current_media is None:
+            # Clear metadata when no media loaded
             self.api.group.set_metadata(Metadata())
             return
+        self.mass.create_task(self.send_current_media_metadata())
 
-        current_item = queue.current_item
-
-        title = current_item.name
-        artist = None
-        album_artist = None
-        album = None
-        track = None
-        artwork_url = None
-        year = None
-
-        if (streamdetails := current_item.streamdetails) and streamdetails.stream_title:
-            # stream title/metadata from radio/live stream
-            if " - " in streamdetails.stream_title:
-                artist, title = streamdetails.stream_title.split(" - ", 1)
-            else:
-                title = streamdetails.stream_title
-                artist = ""
-            # set album to radio station name
-            album = current_item.name
-        elif media_item := current_item.media_item:
-            title = media_item.name
-            if artist_str := getattr(media_item, "artist_str", None):
-                artist = artist_str
-            if _album := getattr(media_item, "album", None):
-                album = _album.name
-                year = getattr(_album, "year", None)
-                album_artist = getattr(_album, "artist_str", None)
-            if _track_number := getattr(media_item, "track_number", None):
-                track = _track_number
+    async def send_current_media_metadata(self) -> None:
+        """Send the current media metadata to the sendspin group."""
+        current_media = self.current_media
+        if current_media is None:
+            return
+        # check if we are playing a MA queue item
+        queue_item: QueueItem | None = None
+        queue: PlayerQueue | None = None
+        if current_media.source_id and current_media.queue_item_id:
+            queue = self.mass.player_queues.get(current_media.source_id)
+            queue_item = self.mass.player_queues.get_item(
+                current_media.source_id, current_media.queue_item_id
+            )
 
         # Send album and artist artwork
-        artwork_url = await self._send_album_artwork(current_item)
-        await self._send_artist_artwork(current_item)
+        if queue_item:
+            await self._send_album_artwork(queue_item)
+            await self._send_artist_artwork(queue_item)
 
-        track_duration = current_item.duration
-
+        track_duration = current_media.duration or 0
         repeat = SendspinRepeatMode.OFF
-        if queue.repeat_mode == RepeatMode.ALL:
+        if queue and queue.repeat_mode == RepeatMode.ALL:
             repeat = SendspinRepeatMode.ALL
-        elif queue.repeat_mode == RepeatMode.ONE:
+        elif queue and queue.repeat_mode == RepeatMode.ONE:
             repeat = SendspinRepeatMode.ONE
 
-        shuffle = queue.shuffle_enabled
+        shuffle = queue.shuffle_enabled if queue else False
 
         metadata = Metadata(
-            title=title,
-            artist=artist,
-            album_artist=album_artist,
-            album=album,
-            artwork_url=artwork_url,
-            year=year,
-            track=track,
+            title=current_media.title,
+            artist=current_media.artist,
+            album_artist=None,  # TODO: extract from optional queue item
+            album=current_media.album,
+            artwork_url=current_media.image_url,
+            year=None,  # TODO: extract from optional queue item
+            track=None,  # TODO: extract from optional queue item
             track_duration=track_duration * 1000 if track_duration is not None else None,
-            track_progress=int(queue.corrected_elapsed_time * 1000),
+            track_progress=int(current_media.corrected_elapsed_time * 1000)
+            if current_media.corrected_elapsed_time
+            else 0,
             playback_speed=1000,
             repeat=repeat,
             shuffle=shuffle,

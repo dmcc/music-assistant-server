@@ -2075,9 +2075,13 @@ class PlayerQueuesController(CoreController):
                     object_id=queue_id,
                     data=queue.elapsed_time,
                 )
+                # also signal update to the player itself so it can update its current_media
+                self.mass.players.trigger_player_update(queue_id)
 
         if send_update:
             self.signal_update(queue_id)
+            # also signal update to the player itself so it can update its current_media
+            self.mass.players.trigger_player_update(queue_id)
 
         # store the new state
         if queue.active:

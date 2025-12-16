@@ -540,6 +540,16 @@ class AirPlayPlayer(Player):
         # always update the state after modifying group members
         self.update_state()
 
+    def _on_player_media_updated(self) -> None:
+        """Handle callback when the current media of the player is updated."""
+        if not self.stream or not self.stream.running or not self.stream.session:
+            return
+        metadata = self.current_media
+        if not metadata:
+            return
+        progress = int(metadata.corrected_elapsed_time or 0)
+        self.mass.create_task(self.stream.send_metadata(progress, metadata))
+
     def update_volume_from_device(self, volume: int) -> None:
         """Update volume from device feedback."""
         ignore_volume_report = (

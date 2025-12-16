@@ -707,6 +707,12 @@ class Player(ABC):
                 return player.player_id
         return None
 
+    def _on_player_media_updated(self) -> None:  # noqa: B027
+        """Handle callback when the current media of the player is updated."""
+        # optional callback for players that want to be informed when the final
+        # current media is updated (after applying group/sync membership logic).
+        # for instance to update any display information on the physical player.
+
     # DO NOT OVERWRITE BELOW !
     # These properties and methods are either managed by core logic or they
     # are used to perform a very specific function. Overwriting these may
@@ -1029,7 +1035,11 @@ class Player(ABC):
         # clear the dict for the cached properties
         self._cache.clear()
         # calculate the new state
+        prev_media_checksum = self._get_player_media_checksum()
         changed_values = self.__calculate_state()
+        if prev_media_checksum != self._get_player_media_checksum():
+            # current media changed, call the media updated callback
+            self._on_player_media_updated()
         # ignore some values that are not relevant for the state
         changed_values.pop("elapsed_time_last_updated", None)
         changed_values.pop("extra_attributes.seq_no", None)
@@ -1195,6 +1205,15 @@ class Player(ABC):
                 category="player_controls",
             ),
         ]
+
+    def _get_player_media_checksum(self) -> str:
+        """Return a checksum for the current media."""
+        if not (media := self.current_media):
+            return ""
+        return (
+            f"{media.uri}|{media.title}|{media.source_id}|{media.queue_item_id}|"
+            f"{media.image_url}|{media.duration}|{media.elapsed_time}"
+        )
 
     def __calculate_state(
         self,

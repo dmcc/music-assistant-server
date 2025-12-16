@@ -30,7 +30,6 @@ from .protocols.raop import RaopStream
 
 if TYPE_CHECKING:
     from music_assistant_models.media_items import AudioFormat
-    from music_assistant_models.player import PlayerMedia
 
     from .player import AirPlayPlayer
     from .provider import AirPlayProvider
@@ -217,8 +216,6 @@ class AirPlayStreamSession:
 
     async def _audio_streamer(self, audio_source: AsyncGenerator[bytes, None]) -> None:
         """Stream audio to all players."""
-        _last_metadata: str | None = None
-        prev_progress_report: float = 0.0
         pcm_sample_size = self.pcm_format.pcm_sample_size
         stream_start_time = time.time()
         first_chunk_received = False
@@ -277,27 +274,6 @@ class AirPlayStreamSession:
                 chunk_seconds = len(chunk) / pcm_sample_size
                 self.seconds_streamed += chunk_seconds
 
-            # send metadata if changed
-            # do this in a separate task to not disturb audio streaming
-            # NOTE: we should probably move this out of the audio stream task into it's own task
-            metadata: PlayerMedia | None
-            if (
-                self.sync_clients
-                and (_leader := self.sync_clients[0])
-                and (_leader.corrected_elapsed_time or 0) > 2
-                and (metadata := _leader.current_media) is not None
-            ):
-                now = time.time()
-                metadata_checksum = f"{metadata.uri}.{metadata.title}.{metadata.image_url}"
-                progress = int(metadata.corrected_elapsed_time or 0)
-                if _last_metadata != metadata_checksum:
-                    _last_metadata = metadata_checksum
-                    prev_progress_report = now
-                    self.mass.create_task(self._send_metadata(progress, metadata))
-                # send the progress report every 5 seconds
-                elif now - prev_progress_report >= 5:
-                    prev_progress_report = now
-                    self.mass.create_task(self._send_metadata(progress, None))
         # Entire stream consumed: send EOF
         self.prov.logger.debug("Audio source stream exhausted")
         async with self._lock:
@@ -342,18 +318,6 @@ class AirPlayStreamSession:
             await ffmpeg.write_eof()
             await ffmpeg.wait_with_timeout(30)
             del ffmpeg
-
-    async def _send_metadata(self, progress: int | None, metadata: PlayerMedia | None) -> None:
-        """Send metadata to all players."""
-        async with self._lock:
-            await asyncio.gather(
-                *[
-                    x.stream.send_metadata(progress, metadata)
-                    for x in self.sync_clients
-                    if x.stream and x.stream.running
-                ],
-                return_exceptions=True,
-            )
 
     async def _prepare_client(self, airplay_player: AirPlayPlayer) -> None:
         """Prepare stream for a single client."""
