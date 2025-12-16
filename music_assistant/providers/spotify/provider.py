@@ -861,10 +861,10 @@ class SpotifyProvider(MusicProvider):
             if "revoked" in str(err):
                 # clear refresh token if it's invalid
                 self.update_config_value(CONF_REFRESH_TOKEN_DEV, None)
+                self.update_config_value(CONF_CLIENT_ID, None)
             # Don't unload - we can still use the global session
             self.dev_session_active = False
             self.logger.warning(str(err))
-            raise
 
         # make sure that our updated creds get stored in memory + config
         self._auth_info_dev = auth_info
