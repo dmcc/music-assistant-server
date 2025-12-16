@@ -8,8 +8,6 @@ from collections.abc import AsyncGenerator
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from music_assistant_models.enums import PlaybackState
-
 from music_assistant.constants import CONF_SYNC_ADJUST
 from music_assistant.helpers.audio import get_player_filter_params
 from music_assistant.helpers.ffmpeg import FFMpeg
@@ -295,11 +293,6 @@ class AirPlayStreamSession:
         Blocks (async) until the data has been written.
         """
         player_id = airplay_player.player_id
-
-        # don't write a chunk if we're paused
-        while airplay_player.playback_state == PlaybackState.PAUSED:
-            await asyncio.sleep(0.1)
-
         # we write the chunk to the player's ffmpeg process which
         # applies any player-specific filters (e.g. volume, dsp, etc)
         # and outputs in the correct format for the player stream
@@ -307,9 +300,10 @@ class AirPlayStreamSession:
         if ffmpeg := self._player_ffmpeg.get(player_id):
             if ffmpeg.closed:
                 return
-            # Use a 10 second timeout - if the write takes longer, the player
+            # Use a 35 second timeout - if the write takes longer, the player
             # has stopped reading data and we're in a deadlock situation
-            await asyncio.wait_for(ffmpeg.write(chunk), timeout=10.0)
+            # 35 seconds is a little bit above out pause timeout (30s) to allow for some margin
+            await asyncio.wait_for(ffmpeg.write(chunk), timeout=35.0)
 
     async def _write_eof_to_player(self, airplay_player: AirPlayPlayer) -> None:
         """Write EOF to a specific player."""
