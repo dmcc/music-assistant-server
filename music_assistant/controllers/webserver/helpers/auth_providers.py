@@ -16,6 +16,7 @@ from hass_client import HomeAssistantClient
 from hass_client.exceptions import BaseHassClientError
 from hass_client.utils import base_url, get_auth_url, get_token, get_websocket_url
 from music_assistant_models.auth import AuthProviderType, User, UserRole
+from music_assistant_models.errors import AuthenticationFailed
 
 from music_assistant.constants import MASS_LOGGER_NAME
 from music_assistant.helpers.datetime import utc
@@ -54,6 +55,8 @@ async def get_ha_user_role(mass: MusicAssistant, ha_user_id: str) -> UserRole:
         hass_prov = cast("HomeAssistantProvider", hass_prov)
         # Query HA for user list to check admin status
         result = await hass_prov.hass.send_command("config/auth/list")
+        if not result:
+            raise RuntimeError("Failed to retrieve user list from Home Assistant")
         for ha_user in result:
             if ha_user.get("id") == ha_user_id:
                 # User is admin if they have "system-admin" in their group_ids
@@ -61,11 +64,12 @@ async def get_ha_user_role(mass: MusicAssistant, ha_user_id: str) -> UserRole:
                 if "system-admin" in group_ids:
                     LOGGER.debug("HA user %s is admin, granting ADMIN role", ha_user_id)
                     return UserRole.ADMIN
-                break
+                else:
+                    return UserRole.USER
+        raise RuntimeError(f"HA user ID {ha_user_id} not found in user list")
     except Exception as err:
-        LOGGER.error("Failed to check HA admin status: %s", err)
-
-    return UserRole.USER
+        msg = f"Failed to check HA admin status: {err}"
+        raise AuthenticationFailed(msg) from err
 
 
 class LoginRateLimiter:
