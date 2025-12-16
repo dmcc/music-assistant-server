@@ -257,6 +257,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
             provider_filter=self._ensure_provider_filter(provider),
             extra_query_parts=[extra_query] if extra_query else None,
             extra_query_params=extra_query_params,
+            in_library_only=True,
         )
 
     async def iter_library_items(
@@ -762,6 +763,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
         extra_query_parts: list[str] | None = None,
         extra_query_params: dict[str, Any] | None = None,
         extra_join_parts: list[str] | None = None,
+        in_library_only: bool = False,
     ) -> list[ItemCls]:
         """Fetch MediaItem records from database by building the query."""
         query_params = extra_query_params or {}
@@ -777,6 +779,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
                 favorite=favorite,
                 search=search,
                 provider_filter=provider_filter,
+                in_library_only=in_library_only,
                 limit=limit,
             )
         else:
@@ -788,6 +791,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
                 favorite=favorite,
                 search=search,
                 provider_filter=provider_filter,
+                in_library_only=in_library_only,
             )
         # build and execute final query
         sql_query = self._build_final_query(query_parts, join_parts, order_by)
@@ -822,6 +826,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
         favorite: bool | None,
         search: str | None,
         provider_filter: list[str] | None,
+        in_library_only: bool,
         limit: int,
     ) -> None:
         """Build a fast random subquery with all filters applied."""
@@ -836,6 +841,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
             favorite=favorite,
             search=search,
             provider_filter=provider_filter,
+            in_library_only=in_library_only,
         )
 
         # Build the subquery
@@ -864,6 +870,7 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
         favorite: bool | None,
         search: str | None,
         provider_filter: list[str] | None,
+        in_library_only: bool,
     ) -> None:
         """Apply search, favorite, and provider filters."""
         # handle search
@@ -881,8 +888,14 @@ class MediaControllerBase[ItemCls: "MediaItemType"](metaclass=ABCMeta):
             join_parts.append(
                 f"JOIN provider_mappings ON provider_mappings.item_id = {self.db_table}.item_id "
                 f"AND provider_mappings.media_type = '{self.media_type.value}' "
-                "AND provider_mappings.in_library = 1 "
+                f"AND provider_mappings.in_library = {in_library_only} "
                 f"AND ({' OR '.join(provider_conditions)})"
+            )
+        elif in_library_only:
+            join_parts.append(
+                f"JOIN provider_mappings ON provider_mappings.item_id = {self.db_table}.item_id "
+                f"AND provider_mappings.media_type = '{self.media_type.value}' "
+                f"AND provider_mappings.in_library = {in_library_only} "
             )
 
     @final
