@@ -218,9 +218,6 @@ class WebserverController(CoreController):
         # add info
         routes.append(("GET", "/info", self._handle_server_info))
         routes.append(("OPTIONS", "/info", self._handle_cors_preflight))
-        # add logging
-        routes.append(("GET", "/music-assistant.log", self._handle_application_log))
-        routes.append(("OPTIONS", "/music-assistant.log", self._handle_cors_preflight))
         # add websocket api
         routes.append(("GET", "/ws", self._handle_ws_client))
         # also host the image proxy on the webserver
@@ -538,19 +535,6 @@ class WebserverController(CoreController):
             error = f"{error_type}: {error_msg}"
             self.logger.exception("Error executing command %s: %s", command_msg.command, error)
             return web.Response(status=500, text="Internal server error")
-
-    async def _handle_application_log(self, request: web.Request) -> web.Response:
-        """Handle request to get the application log."""
-        log_data = await self.mass.get_application_log()
-        return web.Response(
-            text=log_data,
-            content_type="text/text",
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            },
-        )
 
     async def _handle_api_intro(self, request: web.Request) -> web.Response:
         """Handle request for API introduction/documentation page."""

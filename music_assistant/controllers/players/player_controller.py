@@ -1206,7 +1206,7 @@ class PlayerController(CoreController):
         for player_id in list(player_ids):
             await self.cmd_ungroup(player_id)
 
-    @api_command("players/create_group_player")
+    @api_command("players/create_group_player", required_role="admin")
     async def create_group_player(
         self, provider: str, name: str, members: list[str], dynamic: bool = True
     ) -> Player:
@@ -1233,7 +1233,7 @@ class PlayerController(CoreController):
             f"Provider {provider} does not support creating group players"
         )
 
-    @api_command("players/remove_group_player")
+    @api_command("players/remove_group_player", required_role="admin")
     async def remove_group_player(self, player_id: str) -> None:
         """
         Remove a group player.
@@ -1418,7 +1418,7 @@ class PlayerController(CoreController):
             self.delete_player_config(player_id)
         self.mass.signal_event(EventType.PLAYER_REMOVED, player_id)
 
-    @api_command("players/remove")
+    @api_command("players/remove", required_role="admin")
     async def remove(self, player_id: str) -> None:
         """
         Remove a player from a provider.

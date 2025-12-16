@@ -272,7 +272,9 @@ class RemoteAccessManager:
             return await get_remote_access_info()
 
         self._on_unload_callbacks.append(
-            self.mass.register_api_command("remote_access/info", get_remote_access_info)
+            self.mass.register_api_command(
+                "remote_access/info", get_remote_access_info, required_role="admin"
+            )
         )
         self._on_unload_callbacks.append(
             self.mass.register_api_command(
