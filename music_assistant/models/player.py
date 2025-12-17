@@ -1372,7 +1372,7 @@ class Player(ABC):
                     media_type=current_item.media_type,
                     title=stream_metadata.title or current_item.name,
                     artist=stream_metadata.artist,
-                    album=stream_metadata.album or current_item.name,
+                    album=stream_metadata.album or stream_metadata.description or current_item.name,
                     image_url=(stream_metadata.image_url or item_image_url),
                     duration=stream_metadata.duration or current_item.duration,
                     source_id=active_queue.queue_id,
