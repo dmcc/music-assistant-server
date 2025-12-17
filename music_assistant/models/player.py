@@ -1355,6 +1355,8 @@ class Player(ABC):
             active_queue = self.mass.player_queues.get(self._current_media.source_id)
         if not active_queue and self.active_source:
             active_queue = self.mass.player_queues.get(self.active_source)
+        if not active_queue and self._active_source is None:
+            active_queue = self.mass.player_queues.get(self.player_id)
 
         if active_queue and (current_item := active_queue.current_item):
             item_image_url = (
@@ -1383,12 +1385,18 @@ class Player(ABC):
                 )
             if media_item := current_item.media_item:
                 # normal media item
+                # we use getattr here to avoid issues with different media item types
+                version = getattr(media_item, "version", None)
+                album = getattr(media_item, "album", None)
+                podcast = getattr(media_item, "podcast", None)
+                metadata = getattr(media_item, "metadata", None)
+                description = getattr(metadata, "description", None) if metadata else None
                 return PlayerMedia(
                     uri=str(media_item.uri),
                     media_type=media_item.media_type,
-                    title=media_item.name,
+                    title=f"{media_item.name} ({version})" if version else media_item.name,
                     artist=getattr(media_item, "artist_str", None),
-                    album=album.name if (album := getattr(media_item, "album", None)) else None,
+                    album=album.name if album else podcast.name if podcast else description,
                     # the image format needs to be 500x500 jpeg for maximum player compatibility
                     image_url=self.mass.metadata.get_image_url(
                         current_item.media_item.image, size=500, image_format="jpeg"
