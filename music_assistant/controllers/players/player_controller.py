@@ -1354,8 +1354,6 @@ class PlayerController(CoreController):
         player.set_config(player_config)
         # call hook after the player is registered and config is set
         await player.on_config_updated()
-        # always call update to fix special attributes like display name, group volume etc.
-        player.update_state()
 
         self.logger.info(
             "Player registered: %s/%s",
@@ -1367,6 +1365,8 @@ class PlayerController(CoreController):
 
         # register playerqueue for this player
         await self.mass.player_queues.on_player_register(player)
+        # always call update to fix special attributes like display name, group volume etc.
+        player.update_state()
 
     async def register_or_update(self, player: Player) -> None:
         """Register a new player on the controller or update existing one."""
