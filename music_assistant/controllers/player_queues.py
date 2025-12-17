@@ -1096,7 +1096,7 @@ class PlayerQueuesController(CoreController):
             # do nothing while the announcement is in progress
             return
         # determine if this queue is currently active for this player
-        queue.active = player.active_source == queue.queue_id
+        queue.active = player.active_source in (queue.queue_id, None)
         if not queue.active and queue_id not in self._prev_states:
             queue.state = PlaybackState.IDLE
             # return early if the queue is not active and we have no previous state
@@ -2070,6 +2070,15 @@ class PlayerQueuesController(CoreController):
             queue.elapsed_time = elapsed_time
             queue.elapsed_time_last_updated = time.time()
 
+        elif not queue.current_item and queue.current_index is not None:
+            current_index = queue.current_index
+            queue.current_item = current_item = self.get_item(queue_id, current_index)
+            queue.next_item = (
+                self.get_next_item(queue_id, current_index)
+                if current_item and current_index is not None
+                else None
+            )
+
         # This is enough to detect any changes in the DSPDetails
         # (so child count changed, or any output format changed)
         output_formats = []
@@ -2121,6 +2130,12 @@ class PlayerQueuesController(CoreController):
         with suppress(KeyError):
             changed_keys.remove("next_item_id")
 
+        # store the new state
+        if queue.active:
+            self._prev_states[queue_id] = new_state
+        else:
+            self._prev_states.pop(queue_id, None)
+
         # return early if nothing changed
         if len(changed_keys) == 0:
             return
@@ -2146,12 +2161,6 @@ class PlayerQueuesController(CoreController):
             self.signal_update(queue_id)
             # also signal update to the player itself so it can update its current_media
             self.mass.players.trigger_player_update(queue_id)
-
-        # store the new state
-        if queue.active:
-            self._prev_states[queue_id] = new_state
-        else:
-            self._prev_states.pop(queue_id, None)
 
         if "output_formats" in changed_keys:
             # refresh DSP details since they may have changed
