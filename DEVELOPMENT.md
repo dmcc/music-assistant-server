@@ -23,18 +23,6 @@ With this repository cloned locally, execute the following commands in a termina
 * Make sure, that the python interpreter in VS Code is set to the newly generated venv.
 * Debug: Hit (Fn +) F5 to start Music Assistant locally (VS Code), or run `python -m music_assistant --log-level debug` from the command line
 * The pre-compiled UI of Music Assistant will be available at `localhost:8095` 🎉
-* To change the web server's port (e.g., if you're running a production server
-  on the same machine), set `bind_port` in your `settings.json`
-  (`~/.musicassistant/settings.json` by default). Under `core -> webserver`,
-  you'll want something like this:
-
-      "webserver": {
-        "values": {
-          "bind_port": <WEB_SERVER_PORT>
-        },
-        "domain": "webserver",
-        "last_error": null
-      }
 
 NOTE: Always re-run the setup script after you fetch the latest code because requirements could have changed.
 
